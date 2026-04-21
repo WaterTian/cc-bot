@@ -71,6 +71,26 @@ cc-bot/
 - 真名脱敏规则见 memory `feedback_memory_privacy`
 - admin 永久授权见 memory `feedback_lark_bot_admin_auto_auth`
 
+## Git 提交隐私防护（开发本仓库必装）
+
+仓库带了 pre-commit 扫描脚本，阻止真实飞书 ID / 黑名单真名 / secret 误入 commit。新 clone 后一次性装：
+
+```bash
+# 1. 启用 hook 路径
+git config core.hooksPath scripts/hooks
+
+# 2. 复制脚本到 hooks 目录（Windows 无 symlink 用复制，Linux/macOS 可 ln -sf）
+mkdir -p scripts/hooks
+cp scripts/pre-commit-scan.sh scripts/hooks/pre-commit
+chmod +x scripts/hooks/pre-commit scripts/pre-commit-scan.sh
+
+# 3. 建本地真名黑名单（gitignore，不进库）
+cp scripts/blocklist.txt.example scripts/blocklist.txt
+# 编辑 scripts/blocklist.txt 一行一个真名
+```
+
+扫描规则：飞书真实 ID (`cli_/ou_/oc_/om_` + 14 位以上 hex) + blocklist 子串 + `app_secret/api_key/bearer token` 正则。命中即 `exit 1`。确需绕过用 `git commit --no-verify`（谨慎）。
+
 ## 先决条件（使用 cc-bot 的项目需要）
 
 - `lark-cli` 已全局安装并完成 `auth login`（bot + user 身份）

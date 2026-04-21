@@ -1,0 +1,16 @@
+# cc-bot pre-commit 真名黑名单示例
+#
+# 用法:
+#   cp scripts/blocklist.txt.example scripts/blocklist.txt
+#   编辑 scripts/blocklist.txt 一行一个真名
+#   scripts/blocklist.txt 已被 .gitignore 排除，不会进库
+#
+# 规则:
+#   - 一行一个姓名或需保密的字符串
+#   - 以 # 开头的行为注释
+#   - 空行忽略
+#   - 匹配方式：子串精确匹配（非正则），任意一条命中即拒绝 commit
+#
+# 示例（保留为空行，真实名单请本地填）:
+# 张三
+# 李四

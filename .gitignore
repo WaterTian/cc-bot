@@ -17,3 +17,7 @@ yarn-debug.log*
 
 # Claude Code 本地覆盖（含本机绝对路径等项目专属 permission，不进库）
 .claude/settings.local.json
+
+# pre-commit 真名黑名单（本地化，不进库）
+scripts/blocklist.txt
+scripts/hooks/
