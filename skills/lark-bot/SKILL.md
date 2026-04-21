@@ -125,7 +125,7 @@ Read profile  ──┐
 ```
 cc-bot 已上线
 模型: {model_display_name}
-上下文: 已用 X% / 剩余 (100-X)%
+上下文: {bar} X% ({used} / {total})
 
 发送「帮助」查看支持的操作
 ```
@@ -134,15 +134,20 @@ cc-bot 已上线
 ```
 cc-bot 已下线
 模型: {model_display_name}
-上下文: 已用 X% / 剩余 (100-X)%
+上下文: {bar} X% ({used} / {total})
 
 Bot 进入休眠，群消息将不再响应
 ```
 
 **字段规则：**
 - 模型 — `hud.model.display_name`（缺失按 §模型显示规则 fallback）
-- 上下文 — `hud.context_window.used_percentage`（整数），拼 `已用 X% / 剩余 {100-X}%` — **注意：上下线通知用纯文本百分比，不用进度条**（进度条仅在群问"HUD"时的完整状态卡里出现，见 §HUD 状态推送）
+- 上下文：
+  - `{bar}` 进度条：`█` × round(percent/10) + `░` 补满总宽 10（例 7% → `█░░░░░░░░░`；13% → `█▎░░░░░░░░` 也可用 `█░░...` 整数档位更简单）
+  - `X%` 整数百分比（`context_window.used_percentage`）
+  - `({used} / {total})` 绝对值：`current_usage` 各类 token 加总 / `context_window.context_window_size`，人类可读缩写（例 `69K / 1M`、`130K / 200K`）
 - HUD 不可用时两通知都**静默**省略模型 + 上下文两行（保留首行和末行）；不贴安装命令到群里
+
+进度条 / 百分比 / 绝对值三段样式**上下线通知与群问 HUD 的完整状态卡一致**（见 §HUD 状态推送），避免用户在不同场景看到不同格式造成混淆。
 
 **主会话 shim 排查提示仅在开启场景触发**（`/cc-bot:start` 上线通知拼 HUD 段失败、群里显式问"状态/HUD"、开发者主动调试 HUD）。关闭场景 HUD 缺失**不输出**工程提示——用户正在关 bot，此时刷排查信息没意义。
 

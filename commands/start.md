@@ -20,13 +20,17 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
      ```
      cc-bot 已上线
      模型: {model_display_name}
-     上下文: 已用 X% / 剩余 (100-X)%
+     上下文: {bar} X% ({used} / {total})
 
      发送「帮助」查看支持的操作
      ```
      - `模型`: 读 hud-stdin.json 的 `model.display_name`；缺失时按 SKILL.md §模型显示规则 fallback 到 id 映射，再缺就用 `Claude Code`
-     - `上下文`: 读 `context_window.used_percentage`（整数），拼 `已用 X% / 剩余 {100-X}%`；HUD 不可用时**整行省略**
-     - 格式用 `\n` 字面换行（lark-cli `--text` 参数支持）；空行分隔末尾的"发送「帮助」"提示
+     - `上下文` 三段：
+       - `{bar}` 进度条：`█` × round(percent/10) + `░` 补满总宽 10（例 7% → `█░░░░░░░░░`）
+       - `X%` 整数百分比（从 `context_window.used_percentage`）
+       - `({used} / {total})` 绝对值：`current_usage` 总和 / `context_window.context_window_size`，人类可读单位（例 `69K / 1M`）
+     - HUD 不可用时**上下文整行省略**，模型若能从 fallback 拿到就仍保留，否则两行都省
+     - 格式用 `\n` 字面换行（lark-cli `--text` 支持）；空行分隔末尾"发送「帮助」"提示
 
 3. **Monitor 返回 task_id 后**：Edit state.json 回写 `monitor_task_id=<task_id>`
 
