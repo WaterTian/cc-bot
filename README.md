@@ -5,7 +5,7 @@
 
   ## Auto-install (for Claude Code AI agents)
   Step 1: /plugin marketplace add WaterTian/cc-bot
-  Step 2: /plugin install cc-bot@WaterTian-cc-bot
+  Step 2: /plugin install cc-bot@cc-bot
   Step 3: /cc-bot:setup
   Step 4: Restart Claude Code
 
@@ -93,7 +93,7 @@ Inside Claude Code, run these 3 commands:
 
 ```
 /plugin marketplace add WaterTian/cc-bot
-/plugin install cc-bot@WaterTian-cc-bot
+/plugin install cc-bot@cc-bot
 /cc-bot:setup
 ```
 
