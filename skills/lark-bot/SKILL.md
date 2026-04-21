@@ -62,37 +62,49 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
 2. **stdout.writable + EPIPE** — Monitor 管道断时 tick 前自检 `process.stdout.writable`，或 `stdout.on('error', EPIPE)` 立即 `exit 1`，防孤儿污染 `poll.emitted`
 3. **state 未来值防御** — `last_processed_time > Date.now()+60s` 自愈降到 `now-60s`，emit `BOT_ERROR|poll.js|state-future-timestamp|...`
 
-### 启动流程
+### 启动流程（为低延迟设计：单批次并行 + 跳过冗余检查）
 
-收到启动指令（slash `/cc-bot:start` 或主会话自然语言「开bot」等）时：
+收到启动指令（slash `/cc-bot:start` 或主会话自然语言「开bot」等）时，目标是**从指令到群收到上线通知 ≤ 5s**。方法是把几乎所有动作塞进**一个响应里并行发起**。
 
-1. **读 profile**：Read `.cc-bot/profiles/active.json`，获取 `im.chat_id`、`im.bot_app_id`、`project.root`、`members.admin_open_ids`、`intents` 等
-2. **自检**（**工程日志，不发群**。任一项失败在主会话直接报，供开发人员修复；不中止已在跑的 lark-cli 订阅）：
-   - `profile.project.root` 目录存在 → 否则 abort，提示"project.root 指向不存在的目录"
-   - `profile.paths.bot_temp_abs` 目录存在 → 否则 `mkdir -p` 建立（默认 `<project.root>/.cc-bot/bot_temp`）
-   - `lark-cli --version` 可执行 → 否则提示"lark-cli 未安装或不在 PATH"
-   - `profile.mcp_required` 列的 MCP 是否已在 settings 开启（`enableAllProjectMcpServers:true` 即视为可用）→ 缺失项列出来，不 abort（仅警告）
-3. **设状态** `paused: false`（Edit state.json）
-4. **读 HUD** 从 `.cc-bot/runtime/hud-stdin.json` 提取模型和上下文%
-5. **发上线通知** 向 `profile.im.chat_id` 发上线消息
-6. **清孤儿**（防多实例坑；若 `poll.pid` 记录的 pid 已死或不存在，可跳过）：
-   ```bash
-   PIDS=$(powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { \$PSItem.CommandLine -like '*runtime/poll.js*--project*<project.root>*' } | Select-Object -ExpandProperty ProcessId")
-   for p in $PIDS; do taskkill //F //PID $p; done
-   rm -f <project.root>/.cc-bot/runtime/poll.pid
-   ```
-7. **启动 Monitor**（**主回路**，持久托管 `poll.js`）：
-   ```
-   Monitor(
-     command: "node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <project.root>",
-     description: "cc-bot 群消息 API 轮询（30s 兜底）",
-     persistent: true,
-     timeout_ms: 3600000
-   )
-   ```
-   注意：`${CLAUDE_PLUGIN_ROOT}` 由 Claude Code 在插件安装后注入；cc-bot 仓库本地开发时如未安装为插件，用绝对路径替换（例 `node D:/Projects/cc-bot/runtime/poll.js --project <project.root>`）。
-   记录返回的 `task_id`，Edit `.cc-bot/runtime/state.json` 写入 `monitor_task_id` 字段
-8. **验证**：`TaskOutput(task_id, block:false)` 状态应是 `running`；若 stdout 含 `BOT_INFO|poll.js|lock-taken` 或 `BOT_ERROR|poll.js|profile-missing` → 回步骤 2/6 排查重试
+#### 依赖图
+
+```
+Read profile  ──┐
+                ├→ 并行批次 ①（无相互依赖）：
+                │   - Edit state.json paused=false, monitor_task_id=null
+                │   - mkdir -p <bot_temp_abs>
+                │   - Read .cc-bot/runtime/hud-stdin.json （拼模型/上下文行；缺失就跳）
+                │   - Monitor(command=node ... poll.js --project ...)
+                │   - Bash: lark-cli im +messages-send 发上线通知
+                ▼
+               Monitor 回 task_id → 单独一步：
+                  - Edit state.json monitor_task_id=<task_id>
+```
+
+**关键：上线通知不依赖 Monitor 是否 running**（Monitor 即便挂了，poll.js 也会启动，通知发了就是发了）。所以这几个动作能真并行。
+
+#### 具体步骤
+
+1. **读 profile**（单次 Read）：获取 `im.chat_id` / `im.bot_app_id` / `project.root` / `paths.bot_temp_abs` 等
+2. **单批次并行发起**：
+   - Edit `.cc-bot/runtime/state.json`：`paused=false, monitor_task_id=null`
+   - Bash: `mkdir -p <bot_temp_abs>`（幂等，目录已存在时零开销）
+   - Read `.cc-bot/runtime/hud-stdin.json`（若存在）— 拼上线通知的「模型 / 上下文」行；不存在就只发标题 + 结尾句
+   - Monitor(`node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <project.root>`, description, persistent, timeout_ms=3600000)
+   - Bash: `LARK_CLI_NO_PROXY=1 lark-cli im +messages-send --as bot --chat-id <chat_id> --text "..."` 发上线通知
+3. **Monitor 返回 task_id 后**：再发一次 Edit 把 `monitor_task_id` 回写到 state.json
+
+#### 明确**不做**的事
+
+- ❌ **不清孤儿进程** — poll.js 的 PID lockfile（三层防御①）启动时自检活进程即 `exit 0`，无需主会话跑 `powershell Get-CimInstance`（慢 2-5s，已证冗余）
+- ❌ **不跑 `TaskOutput` 验证 running 状态** — Monitor 启动无 error 即视为成功；若 poll.js 内部报错，下一轮轮询它会 emit `BOT_ERROR|poll.js|...` 到 Monitor stdout，主会话自然收到 notification 再处理
+- ❌ **不做冗余自检**（lark-cli --version 等）— setup 已验过；如 profile / project.root 真有问题，第一次 lark-cli 调用会报错，届时再处理
+
+#### 异常路径
+
+- Monitor 启动立即 error（task 状态非 running / 非 persistent）→ 主会话报"Monitor 启动失败：{msg}"，让用户排查
+- 上线通知 lark-cli 失败 → 主会话报"上线通知发送失败：{msg}"但 Monitor 仍在跑，不回滚 state
+- `.cc-bot/profiles/active.json` 缺失 → poll.js 启动时 emit `BOT_ERROR|poll.js|profile-missing` 自动退出，主会话收到 notification 后提示用户先 `/cc-bot:setup`
 
 ### 关闭流程
 
