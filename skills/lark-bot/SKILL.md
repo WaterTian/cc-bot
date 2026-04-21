@@ -94,11 +94,17 @@ Read profile  ──┐
    - Bash: `LARK_CLI_NO_PROXY=1 lark-cli im +messages-send --as bot --chat-id <chat_id> --text "..."` 发上线通知
 3. **Monitor 返回 task_id 后**：再发一次 Edit 把 `monitor_task_id` 回写到 state.json
 
-#### 明确**不做**的事
+#### 明确**不做**的事（及回滚条件）
 
-- ❌ **不清孤儿进程** — poll.js 的 PID lockfile（三层防御①）启动时自检活进程即 `exit 0`，无需主会话跑 `powershell Get-CimInstance`（慢 2-5s，已证冗余）
+- ❌ **不清孤儿进程** — poll.js 的 PID lockfile（三层防御①）启动时自检活进程即 `exit 0`，无需主会话跑 `powershell Get-CimInstance`（慢 2-5s）
+  - **回滚条件**：若实战中观察到以下任一症状就恢复主会话清孤儿（见 git blame 本段或 commit `a7f0b4b` 之前版本）：
+    - 多个同 project 的 `node runtime/poll.js` 同时在跑（`tasklist` 看到 ≥ 2 个）
+    - `poll.emitted` 去重表被重复写入造成同一消息多次推送
+    - `BOT_INFO|poll.js|lock-taken-by-pid-*` notification 频繁出现但老 pid 实际已死
 - ❌ **不跑 `TaskOutput` 验证 running 状态** — Monitor 启动无 error 即视为成功；若 poll.js 内部报错，下一轮轮询它会 emit `BOT_ERROR|poll.js|...` 到 Monitor stdout，主会话自然收到 notification 再处理
+  - **回滚条件**：若观察到 Monitor 启动成功但 poll.js 实际未跑起来（群消息 60s+ 无 NEW_MSG 推送，TaskGet 看 task 状态异常），就加回 `TaskOutput(task_id, block:false)` 验证
 - ❌ **不做冗余自检**（lark-cli --version 等）— setup 已验过；如 profile / project.root 真有问题，第一次 lark-cli 调用会报错，届时再处理
+  - **回滚条件**：若用户常见报错是"setup 跑过但 lark-cli 后来被卸载/PATH 变了"这种漂移问题，再加回版本自检
 
 #### 异常路径
 
