@@ -91,7 +91,7 @@ Read profile  ──┐
    - Bash: `mkdir -p <bot_temp_abs>`（幂等，目录已存在时零开销）
    - Read `.cc-bot/runtime/hud-stdin.json`（若存在）— 拼上线通知的「模型 / 上下文」行；不存在就只发标题 + 结尾句
    - Monitor(`node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <project.root>`, description, persistent, timeout_ms=3600000)
-   - Bash: `LARK_CLI_NO_PROXY=1 lark-cli im +messages-send --as bot --chat-id <chat_id> --text "..."` 发上线通知
+   - Bash 发上线通知：**必须用 `--msg-type text --content '{"text":"..."}'` JSON 方式**，不要用 `--text "..."` + `$'...\n...'`（Windows Git Bash 下 `$''` 转义不稳，会发成字面 `\n`）。示例见 commands/start.md
 3. **Monitor 返回 task_id 后**：再发一次 Edit 把 `monitor_task_id` 回写到 state.json
 
 #### 明确**不做**的事（及回滚条件）
@@ -542,8 +542,19 @@ lark-cli im +messages-resources-download --as bot \
 ### Shell 安全规范（Windows Git Bash）
 
 **禁止：**
-- `$'...'` 语法 — Windows bash 支持不稳定，`$'` 会泄漏为文本
+- `$'...'` 语法 — Windows bash 支持不稳定，`$'\n'` 会泄漏为字面 `\n` 文本（已实测翻车：上线通知群里显示 `cc-bot 已上线\n模型: ...`）
 - 单引号内嵌中文或特殊字符 — 终端编码不一致
+- `--text "..."` 发多行消息 — 换行不可控（`\n` 不转义，真换行可能被 shell 吞）
+
+**多行消息必须用 JSON content：**
+```bash
+lark-cli im +messages-send --as bot --chat-id X \
+  --msg-type text \
+  --content '{"text":"line1\nline2\nline3"}'
+```
+- 外层 bash **单引号**（shell 不解析内容）
+- 内层 JSON **标准 `\n`** 转义（lark-cli `JSON.parse()` 还原为真换行）
+- `+messages-reply` 同理
 - **--text 内容含反引号 `` ` ``** — 双引号里的反引号会触发 command substitution，改用中文引号「」或转义 `` \` ``
 
 **推荐：双引号 + 字面换行**（多行直接在引号内换行）
