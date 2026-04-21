@@ -1,113 +1,262 @@
-# cc-bot
+<!--
+  cc-bot — Claude Code IM-bot plugin
+  Turns any IM group into an AI project assistant. Lark/Feishu first, IM-agnostic by design.
+  Core: IMAdapter abstraction · Monitor + polling (HTTP 30s, WS-proxy-safe) · statusline shim · interactive setup wizard · per-project profiles
 
-**Claude Code 插件** — 把任意 IM 群变成 AI 项目助手。飞书（Lark）起步，IM 可扩展。
+  ## Auto-install (for Claude Code AI agents)
+  Step 1: /plugin marketplace add WaterTian/cc-bot
+  Step 2: /plugin install cc-bot@WaterTian-cc-bot
+  Step 3: /cc-bot:setup
+  Step 4: Restart Claude Code
 
-在群里发自然语言指令，bot 帮你（意图由你在 `profile.intents` 自定义，下面是常见类型）：
+  Keywords: claude-code plugin bot im lark feishu group-chat ai-assistant monitor polling intents statusline hud windows zero-runtime-dep
+-->
 
-- **通用查询** — 项目进度、待办事项、HUD（模型 / 上下文 / 额度）
-- **执行只读动作** — 跑测试、查日志、构建预览、页面巡检、生成二维码等（按项目自定义）
-- **修复 bug** — 成员描述 bug + 截图，bot 定位 + 改代码（profile 配置的代码路径内）
-- **部署 / 写操作** — 部署到生产、写数据库、推送线上（admin 权限，自动通过）
-- **破坏性操作** — drop database / force-push master / 批量删数据等（admin 也要口头确认）
+<h1 align="center">CC-BOT</h1>
 
-适配各类项目：Web / 小程序 / Node 服务 / Python 数据管道 / 移动端等。只要能写脚本的事，`profile.intents` 都能定义。
+<p align="center">
+  <strong>Turn any IM group into an AI project assistant, powered by <a href="https://claude.ai/claude-code">Claude Code</a></strong><br/>
+  <sub>把任意 IM 群变成 AI 项目助手，由 Claude Code 驱动</sub>
+</p>
 
-## Auto-install (for Claude Code AI agents)
+<p align="center">
+  <code>IM group</code> &nbsp;&rarr;&nbsp; <code>Monitor</code> &nbsp;&rarr;&nbsp; <code>Intent</code> &nbsp;&rarr;&nbsp; <code>Claude acts</code> &nbsp;&rarr;&nbsp; <code>Chat reply</code>
+  <br/>
+  <sub>natural-language command → per-project action → report back to group.</sub>
+</p>
 
-```
-Step 1: /plugin marketplace add WaterTian/cc-bot
-Step 2: /plugin install cc-bot@WaterTian-cc-bot
-Step 3: /cc-bot:setup
-Step 4: Restart Claude Code
-```
+<p align="center">
+  <a href="#install"><img src="https://img.shields.io/badge/install-3_commands-blueviolet?style=flat-square" alt="install" /></a>
+  &nbsp;
+  <img src="https://img.shields.io/badge/im-lark%20%C2%B7%20extensible-blue?style=flat-square" alt="im" />
+  &nbsp;
+  <img src="https://img.shields.io/badge/runtime-Node.js-brightgreen?style=flat-square" alt="node" />
+  &nbsp;
+  <img src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-lightgrey?style=flat-square" alt="platform" />
+  &nbsp;
+  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT" />
+</p>
 
-## 安装
+<br/>
 
-### 方式 1：插件市场（推荐，发布后）
+## Why CC-BOT?
+
+<table>
+<tr><td>
+
+### The Problem
+
+Team members want a lightweight way to ask questions and trigger project actions **from the group chat** — "what's the progress?", "run tests", "deploy staging", "why is build failing?" — without switching to terminals, dashboards, or ticket systems. Existing chat-bots require bespoke backends per project and rarely integrate with an AI coding agent.
+
+### The Solution
+
+CC-BOT is a **Claude Code plugin** that listens to IM group messages, routes natural-language intents to per-project actions (you define them), runs them through Claude, and replies back to the group. **One plugin, any number of projects** — each project has its own `profile.intents` dict mapping intent → action description, and the same Claude Code brain executes them.
+
+</td></tr>
+</table>
+
+## 为什么做 CC-BOT？
+
+<table>
+<tr><td>
+
+### 问题
+
+团队希望**在群里**就能快速查询和触发项目操作 — 「进度怎么样？」「跑一下测试」「部署灰度」「构建为什么失败？」 — 而不用切到终端、仪表盘或工单系统。现有的聊天机器人通常需要为每个项目定制后端，并且很少与 AI 编程助手打通。
+
+### 解决方案
+
+CC-BOT 是一个 **Claude Code 插件**，监听 IM 群消息，把自然语言意图路由到项目特定操作（由你定义），通过 Claude 执行，结果回到群里。**一份插件、任意项目** — 每个项目有自己的 `profile.intents` 字典（意图 → 动作描述），同一个 Claude Code 脑子来执行。
+
+</td></tr>
+</table>
+
+<br/>
+
+## Features
+
+<table>
+<tr>
+  <td align="center" width="20%"><h3>⚙</h3><b>Interactive Setup</b><br/><sub>5-stage wizard<br/>auto-detect IDs</sub></td>
+  <td align="center" width="20%"><h3>🔌</h3><b>IM-agnostic</b><br/><sub>Lark today<br/>adapter pattern</sub></td>
+  <td align="center" width="20%"><h3>📣</h3><b>Per-project Intents</b><br/><sub>JSON-defined<br/>Claude executes</sub></td>
+  <td align="center" width="20%"><h3>🛡</h3><b>Crash-resistant</b><br/><sub>3-layer defense<br/>PID lock · EPIPE · state heal</sub></td>
+  <td align="center" width="20%"><h3>🎚</h3><b>HUD-aware</b><br/><sub>statusline shim<br/>tees cc-hud if installed</sub></td>
+</tr>
+</table>
+
+<br/>
+
+## Install
+
+Inside Claude Code, run these 3 commands:
 
 ```
 /plugin marketplace add WaterTian/cc-bot
 /plugin install cc-bot@WaterTian-cc-bot
+/cc-bot:setup
 ```
 
-### 方式 2：本地源码（开发 / 早期尝鲜）
+Restart Claude Code. **Done.**
+
+> [!NOTE]
+> After install, `/reload-plugins` works without restarting.
+
+<details>
+<summary><b>From source (development)</b></summary>
+<br/>
 
 ```bash
-git clone https://github.com/WaterTian/cc-bot
-# 在目标项目下启 Claude Code：
-claude --plugin-dir <绝对路径>/cc-bot
+git clone https://github.com/WaterTian/cc-bot.git
 ```
 
-## 使用
+Inside your target project, launch Claude Code with the local plugin:
 
-### 首次配置（交互式向导）
-
-在目标项目 Claude Code 会话里发 **`/cc-bot:setup`**，向导会：
-
-1. 检测 lark-cli（未装自动 `npm i -g @larksuite/cli`）
-2. 飞书开放平台建应用 + scope 清单 + 浏览器 OAuth 登录（卡片式确认）
-3. 列出 bot 所在群让你选，或一键新建群（AskUserQuestion 卡片）
-4. 自动探测 `bot_app_id` / `admin_open_id`，写入 `.cc-bot/profiles/active.json`
-5. 注册 statusline shim（接管 `~/.claude/settings.json` 的 statusLine，落盘 HUD 数据，并 tee cc-hud 渲染状态栏，若装了 cc-hud）
-6. 建 `.cc-bot/runtime/state.json` + `member-cache.json` + `.gitignore`
-
-配完发 **`/cc-bot:start`** 或主会话说「开bot」即可。
-
-### 命令族
-
-| 命令 | 作用 |
-|------|------|
-| `/cc-bot:setup` | 首次配置（交互式向导，幂等重入） |
-| `/cc-bot:start` 或 `开bot` / `启动bot` | 启 Monitor + 发上线通知 |
-| `/cc-bot:stop` 或 `关bot` / `停bot` | 停 Monitor + 发下线通知 |
-| `/cc-bot:new-profile <name>` | 从 template 生成新 profile |
-| `/cc-bot:switch <name>` | 切换激活 profile（自动先关正在跑的 bot） |
-
-主会话也接受自然语言触发（"开bot"、"关bot"、"切换到 xxx"），经意图识别走对应 slash。
-
-## 前置依赖
-
-- **Claude Code**（用到 Skill / Monitor / TaskStop / AskUserQuestion 等工具）
-- **飞书 CLI** — `npm i -g @larksuite/cli` + `lark-cli auth login`（setup 会引导做这两步）
-- **Git Bash**（Windows）— poll.js adapter 用 bash shell 传 argv 规避 cmd.exe 的坑
-- 可选：**cc-hud** — 搭配显示状态栏（`/plugin install cc-hud@WaterTian-cc-hud` + `/cc-hud:setup`）
-
-## 架构
-
-```
-主会话 ── Monitor(persistent) ── node poll.js ── 每 30s IMAdapter.listRecentMessages()
-                                              ├─ state.last_processed_time + poll.emitted 去重
-                                              └─ stdout: NEW_MSG|... → 主会话 → adapter.sendText
-
-statusline shim ── 接管 CC statusLine ── 落盘 .cc-bot/runtime/hud-stdin.json
-                                      └─ tee cc-hud（可选）渲染状态栏
+```bash
+cd /your/project
+claude --plugin-dir /absolute/path/to/cc-bot
 ```
 
-**HTTP 短连接** 替代 WebSocket（vpn 代理下 WS 易静默断流，HTTP 稳定）。**三层防御**：PID lockfile 单例 / stdout EPIPE 自杀 / state 未来值自愈。
+Then `/cc-bot:setup`.
 
-## 项目无关性
+</details>
 
-| 模块 | 位置 | 跟谁走 |
-|------|------|--------|
-| SKILL / adapter / poll.js / commands / templates | `${CLAUDE_PLUGIN_ROOT}/` | 插件版本 |
-| 群 ID / 项目根 / 成员 / 意图映射 | `<project>/.cc-bot/profiles/active.json` | 每项目（gitignore） |
-| state / 缓存 / pid / 去重 / bot_temp | `<project>/.cc-bot/runtime/` + `.cc-bot/bot_temp/` | 每项目（gitignore） |
+<br/>
 
-一套插件，多项目并行使用互不污染。
+## Quick Start
 
-## 扩展新 IM
+Run **`/cc-bot:setup`** in your target project. The interactive wizard will:
 
-当前仅飞书 adapter。加企业微信 / 钉钉 / Slack / Discord 的流程：
+1. **Detect lark-cli** — auto-install via `npm i -g @larksuite/cli` if missing
+2. **OAuth login** — guide you through Lark Open Platform app creation (scope checklist provided), browser Device Flow login
+3. **Pick target chat** — list bot's chats via `AskUserQuestion` card, or one-click create a new chat (bot auto-joins, you become the owner)
+4. **Auto-detect IDs** — `bot_app_id` / `admin_open_id` pulled from `lark-cli auth list`, no manual entry
+5. **Write config** — generate `.cc-bot/profiles/active.json` + `state.json` + pre-filled `member-cache.json` + `.gitignore`
+6. **Register statusline shim** — tees stdin JSON to `hud-stdin.json` (for bot) + cc-hud rendering (if installed, for status bar)
 
-1. `adapters/<im>.js` 继承 `IMAdapter`（见 `adapters/base.js`）实现 `listRecentMessages / sendText / sendImage / downloadResource / getUser`
-2. `runtime/poll.js` 的 adapter factory 加 `if (im.type === '<im>')` 分支
-3. profile 的 `im.type` 填对应 IM 名
-4. 新增 `skills/<im>-bot/SKILL.md` 或复用现有
+Then **`/cc-bot:start`** (or just say "开bot" / "start bot" in the main session).
 
-## 隐私防护
+<br/>
 
-仓库自带 pre-commit 扫描脚本，阻止真实 IM ID / 真名 / api secret 误入 commit。开发者本地一次性装（见 CLAUDE.md §Git 提交隐私防护）。
+## How It Works
 
-## License
+```
+Main session ── Monitor(persistent) ── node poll.js ── every 30s: IMAdapter.listRecentMessages()
+                                                    ├─ dedupe via state.last_processed_time + poll.emitted
+                                                    └─ stdout: NEW_MSG|msg_id|sender|text|ts
+                                                               ↓ Monitor → notification
+                                                         main session → intent routing → adapter.sendText
 
-MIT © Water
+CC's statusLine ── cc-bot shim ── write hud-stdin.json (for bot's HUD intent)
+                                └─ tee cc-hud (optional, for status bar rendering)
+```
+
+<table>
+<tr>
+  <td align="center"><b>HTTP polling</b><br/><sub>30s fixed interval<br/>VPN-proxy safe<br/>no WS disconnect</sub></td>
+  <td align="center"><b>3-layer defense</b><br/><sub>PID lockfile<br/>stdout EPIPE self-kill<br/>state future-value heal</sub></td>
+  <td align="center"><b>Per-project isolation</b><br/><sub>.cc-bot/ per project<br/>profiles · runtime · bot_temp<br/>zero cross-contamination</sub></td>
+</tr>
+</table>
+
+<br/>
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/cc-bot:setup` | First-run interactive wizard (idempotent, safe to re-run) |
+| `/cc-bot:start` · `开bot` / `start bot` | Start Monitor + send online notification to chat |
+| `/cc-bot:stop` · `关bot` / `stop bot` | Stop Monitor + send offline notification |
+| `/cc-bot:new-profile <name>` | Create new profile from template |
+| `/cc-bot:switch <name>` | Switch active profile (auto-stops running bot first) |
+
+Main session also accepts natural-language triggers (`开bot` / `关bot` / `switch to xxx`).
+
+<br/>
+
+## Profile Intents — Per-project Customization
+
+Each project has its own `.cc-bot/profiles/active.json`. The `intents` dict maps natural-language intents to action descriptions Claude executes when the group triggers them. Typical examples (you pick the keys and describe the actions freely):
+
+```json
+{
+  "intents": {
+    "deploy": "Run `bash scripts/deploy.sh production`, report stdout tail",
+    "run_tests": "Run `npm test`, report pass/fail counts + first failure trace",
+    "query_logs": "Use mcp__cloudbase__logs to fetch last 20 error logs, summarize",
+    "build_preview": "Run `npm run build:preview`, upload artifact to <paths.bot_temp_abs>, reply with link"
+  }
+}
+```
+
+Works for **any project type** — Web / mini-program / Node service / Python data pipeline / mobile app. If you can script it, you can intent-route it.
+
+<br/>
+
+## Prerequisites
+
+- **Claude Code** — uses `Skill` / `Monitor` / `TaskStop` / `AskUserQuestion` tools
+- **lark-cli** — `npm i -g @larksuite/cli` + `lark-cli auth login` (setup wizard will guide this)
+- **Git Bash on Windows** — poll.js adapter uses bash shell to pass argv safely (cmd.exe mangles special characters)
+- **Optional: cc-hud** — install for prettier status bar (`/plugin install cc-hud@WaterTian-cc-hud`); cc-bot shim tees it automatically
+
+<br/>
+
+## 快速开始（中文）
+
+在目标项目里运行 **`/cc-bot:setup`**，交互式向导会：
+
+1. **检测 lark-cli** — 未装自动 `npm i -g @larksuite/cli`
+2. **OAuth 登录引导** — 带你去飞书开放平台建应用（附必需 scope 清单），完成浏览器 Device Flow 登录
+3. **选目标群** — 用 `AskUserQuestion` 卡片列 bot 所在群，或一键新建（bot 自动入群、你成为群主）
+4. **自动探测 ID** — `bot_app_id` / `admin_open_id` 从 `lark-cli auth list` 直接取，不用手填
+5. **写配置** — 生成 `.cc-bot/profiles/active.json` + `state.json` + 预填 `member-cache.json` + `.gitignore`
+6. **注册 statusline shim** — 落盘 stdin JSON（给 bot 用）+ 可选透传 cc-hud（渲染状态栏）
+
+然后 **`/cc-bot:start`**（或主会话直接说「开bot」）。
+
+<br/>
+
+## Per-project Layout
+
+| Component | Location | Distribution |
+|---|---|---|
+| SKILL · adapter · poll.js · commands · templates | `${CLAUDE_PLUGIN_ROOT}/` | plugin version |
+| Chat IDs · project root · members · intents | `<project>/.cc-bot/profiles/active.json` | per-project (gitignored) |
+| state · cache · pid · dedupe · bot_temp | `<project>/.cc-bot/runtime/` + `.cc-bot/bot_temp/` | per-project (gitignored) |
+
+**One plugin, many projects in parallel — zero cross-contamination.**
+
+<br/>
+
+## Extend to a New IM
+
+cc-bot ships with Lark. Adding WeCom / DingTalk / Slack / Discord / etc:
+
+1. Add `adapters/<im>.js` extending `IMAdapter` (see `adapters/base.js`) — implement `listRecentMessages / sendText / sendImage / downloadResource / getUser`
+2. Add factory branch in `runtime/poll.js`: `if (im.type === '<im>') { ... }`
+3. Set `im.type` in `profile.active.json` to the new IM name
+4. Add `skills/<im>-bot/SKILL.md` or extend existing one
+
+<br/>
+
+## Privacy Protection
+
+Repo ships a pre-commit scanner that blocks real IM IDs (`cli_*` / `ou_*` / `oc_*` / `om_*`) / real-name blocklist / api-secret patterns from entering commits. One-time setup — see CLAUDE.md §Git 提交隐私防护.
+
+<br/>
+
+## Star History
+
+<a href="https://star-history.com/#WaterTian/cc-bot&Date">
+  <img src="https://api.star-history.com/svg?repos=WaterTian/cc-bot&type=Date" alt="Star History Chart" width="700" />
+</a>
+
+<br/>
+
+---
+
+<p align="center">
+  <sub>MIT License &copy; <a href="https://github.com/WaterTian">Water</a></sub>
+</p>
