@@ -16,7 +16,17 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
    - Bash: `mkdir -p <paths.bot_temp_abs>`（幂等）
    - Read `.cc-bot/runtime/hud-stdin.json`（若存在 → 拼"模型 / 上下文"两行；不存在 → 只发标题 + 结尾句）
    - Monitor: `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <project.root>`（persistent, timeout_ms=3600000）
-   - Bash: `LARK_CLI_NO_PROXY=1 lark-cli im +messages-send --as bot --chat-id <chat_id> --text "cc-bot 已上线\n模型: ...\n上下文: ...\n\n发送「帮助」查看支持的操作"`
+   - Bash: `LARK_CLI_NO_PROXY=1 lark-cli im +messages-send --as bot --chat-id <chat_id> --text "{notification}"`；`{notification}` 固定格式：
+     ```
+     cc-bot 已上线
+     模型: {model_display_name}
+     上下文: 已用 X% / 剩余 (100-X)%
+
+     发送「帮助」查看支持的操作
+     ```
+     - `模型`: 读 hud-stdin.json 的 `model.display_name`；缺失时按 SKILL.md §模型显示规则 fallback 到 id 映射，再缺就用 `Claude Code`
+     - `上下文`: 读 `context_window.used_percentage`（整数），拼 `已用 X% / 剩余 {100-X}%`；HUD 不可用时**整行省略**
+     - 格式用 `\n` 字面换行（lark-cli `--text` 参数支持）；空行分隔末尾的"发送「帮助」"提示
 
 3. **Monitor 返回 task_id 后**：Edit state.json 回写 `monitor_task_id=<task_id>`
 
