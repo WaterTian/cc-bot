@@ -158,19 +158,16 @@ Read profile  ──┐
 
 回复群消息时用 `member-cache.json` 里的真实 `name` 称呼对方（产品体验例外，不算泄露）。
 
-### 权限矩阵
+### 权限矩阵（按 intent 类别，具体键由 profile.intents 自定义）
 
-| 操作 | 权限 | 说明 |
+| 类别 | 权限 | 说明 |
 |------|------|------|
-| 查询进度 / 待办 / 数据 / 测试状态 / 后台地址 / HUD / 帮助 | public | 读文档或数据库 |
-| 编译预览 / 出二维码（小程序项目） | public | 按 `profile.intents.compile_preview` 执行 |
-| 页面检查 / 巡检 / 错误监控 | public | 按 `profile.intents.page_check` / `error_monitor` 执行 |
-| 跑单元测试 | public | 按 `profile.intents.query_test` 执行 |
-| 修改项目普通代码（前端/小程序视图） | public | 修改 `profile.tech_stack.*_dir` 下的非云端代码 |
-| 修改云函数代码 / 配置文件 | admin-auto | 需部署才生效的代码 |
-| 部署云函数 / 部署后台 | admin-auto | 按 `profile.intents.deploy_*` 执行 |
-| 上传小程序 | admin-auto | `profile.intents.upload_mp`，需版本号 |
-| 破坏性操作（删除关键文件 / force-push master / 批量删数据等） | admin-confirm | 即使 admin 也口头确认一次 |
+| 查询类（进度 / 待办 / 状态 / HUD / 帮助 / 其他只读查询） | public | 读文档、读缓存、读第三方 API |
+| 非破坏性的执行类（编译 / 预览 / 跑测试 / 查日志 / 生成二维码 / 页面巡检等） | public | 按 `profile.intents.<key>` 描述执行，无副作用 |
+| 修改非生产代码（前端视图 / 本地脚本 / 非关键配置） | public | 编辑 `profile.tech_stack.*` 字段指向的代码路径 |
+| 修改关键代码 / 部署类（部署生产 / 推送线上 / 改关键配置） | admin-auto | 按 `profile.intents.<key>` 执行，仅 admin 可用；执行前回纯文本占位，完工报结果 |
+| 写类外部资源（数据库写 / 删文件 / 清缓存 / 上传新版本 / 重启服务） | admin-auto | 同上 |
+| 破坏性操作（删全量数据 / force-push master / drop database / 删关键文件等） | admin-confirm | 即使 admin 也口头确认一次 |
 
 **权限档位含义：**
 
@@ -197,22 +194,30 @@ Claude 用自然语言理解判定意图，不做关键词匹配。
 
 ### 项目特定意图（从 `profile.intents` 读取）
 
-常见键：`compile_preview` / `build_status` / `page_check` / `page_patrol` / `error_monitor` / `modify_page` / `modify_function` / `deploy_function` / `deploy_admin` / `upload_mp` / `query_test` / `query_admin_url`。
+键名由项目自定义（无预设清单）—— 每个键是一条"自然语言意图 → 具体动作"的映射，Claude 用语义理解匹配群消息意图到 key，再按 `profile.intents.<key>` 的描述执行。
 
-Claude 按 `profile.intents.<key>` 字段描述的具体命令/步骤操作。profile 未定义的意图 → 回"当前项目未配置该操作，请检查 profile.intents"。
+**典型例子**（按需参考，不是强制清单）：
+- `deploy`: `用 bash scripts/deploy.sh 部署到生产`
+- `run_tests`: `跑 npm test 并汇报通过数 / 失败数`
+- `query_logs`: `用 mcp__cloudbase__logs 查最近 20 条错误日志`
+- `compile_preview`（小程序项目）: `用 mcp__wechat-devtools__preview 出二维码到 <paths.bot_temp_abs>/preview-qr.png，然后 lark-cli 发图`
+- `check_build`（Web / Node 项目）: `tail -50 build.log 看最后构建结果`
+
+profile 未定义的意图 → 回"当前项目未配置该操作，请检查 profile.intents"。
 
 ### 帮助动态筛选规则
 
 触发"帮助"意图时，**根据当前 profile 实际配置**动态生成清单，**不列不能用的意图**，避免用户"点了说未配置"的错路：
 
-| 意图 | 仅当以下条件满足才列出 |
-|------|---|
+| 意图类别 | 仅当以下条件满足才列出 |
+|---|---|
 | `query_progress` / `query_todo` | `profile.project.doc_progress` 非空且文件存在 |
-| `query_admin_url` / `deploy_admin` | `profile.intents.query_admin_url` / `deploy_admin` 非空字符串 |
-| `compile_preview` / `build_status` / `page_check` / `page_patrol` / `error_monitor` / `modify_page` / `modify_function` / `deploy_function` / `upload_mp` / `query_test` | 同上，`profile.intents.<key>` 非空才列 |
+| 任意项目特定意图（`profile.intents.<key>`） | 该 key 对应的 value 是非空字符串（该动作已配置） |
 | `hud` / `help` | 永久可用（不依赖 profile 字段） |
 
-**最小可用清单**（新项目刚 setup，intents 全空 + doc_progress 空）应该至少包含 `状态 / 帮助`（加一句"可在 .cc-bot/profiles/active.json 配置 intents 开启更多能力"），而不是罗列一堆未配置项。
+生成帮助文本时按 `profile.intents.<key>` 的**描述文字**摘 1 句人话展示（让群成员能看懂做什么），不要机械回显 key 名。
+
+**最小可用清单**（新项目刚 setup，intents 空 + doc_progress 空）只列 `状态 / 帮助` + 一句引导："可在 `.cc-bot/profiles/active.json` 的 intents 字段自定义意图开启更多能力"。
 
 #### 占位符约定
 
@@ -296,7 +301,7 @@ Claude 按 `profile.intents.<key>` 字段描述的具体命令/步骤操作。pr
 ### Bug 报告处理节奏（多 bug 密集会话）
 
 1. **立刻确认收到**（1 轮内）：回"收到 {name} 反馈的 {bug 简述}，正在定位..."
-2. **定位根因**：读文件、查日志，必要时用 profile.intents 的 page_check 类工具复现
+2. **定位根因**：读文件、查日志，必要时用 profile.intents 里的复现类意图（如 `page_check` / `run_tests` / `query_logs` 等，看 profile 实际配置）
 3. **修复**：Edit 代码文件（在 profile.project.root 下）
 4. **回结果 + 下一步**：报"已修复 {xxx}，原因 {根因}"，根据改动范围提示是否需要新二维码 / 部署
 
