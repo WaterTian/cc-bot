@@ -1,0 +1,33 @@
+{
+  "name": "cc-bot",
+  "owner": {
+    "name": "Water"
+  },
+  "metadata": {
+    "description": "Claude Code plugin that turns any IM group into an AI project assistant (Lark/Feishu first, more IMs extensible)",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "cc-bot",
+      "source": "./",
+      "description": "Listen to IM group messages, dispatch natural-language intents, run per-project actions (build/deploy/query/bug-fix), reply to chat. Plug-and-play with Claude Code — one setup per project.",
+      "category": "collaboration",
+      "tags": [
+        "bot",
+        "im",
+        "lark",
+        "feishu",
+        "group-chat",
+        "ai-assistant",
+        "monitor",
+        "polling",
+        "intents",
+        "statusline",
+        "hud",
+        "windows",
+        "zero-runtime-dep"
+      ]
+    }
+  ]
+}
