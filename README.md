@@ -5,9 +5,9 @@
 
   ## Auto-install (for Claude Code AI agents)
   Step 1: /plugin marketplace add WaterTian/cc-bot
-  Step 2: /plugin install cc-bot@cc-bot
-  Step 3: /cc-bot:setup
-  Step 4: Restart Claude Code
+  Step 2: /plugin install cc-bot@cc-bot   (CC will prompt for scope; pick "local" for quick try, "project" for team share, "user" for global)
+  Step 3: /reload-plugins   (or /exit + re-launch claude)
+  Step 4: /cc-bot:setup   (interactive wizard — auto-installs lark-cli, OAuth login, chat picker, config auto-fill)
 
   Keywords: claude-code plugin bot im lark feishu group-chat ai-assistant monitor polling intents statusline hud windows zero-runtime-dep
 -->
@@ -89,52 +89,65 @@ CC-BOT 是一个 **Claude Code 插件**，监听 IM 群消息，把自然语言�
 
 ## Install
 
-Inside Claude Code, run these 3 commands:
+Inside Claude Code **in your target project**, run these in order:
 
 ```
 /plugin marketplace add WaterTian/cc-bot
 /plugin install cc-bot@cc-bot
+/reload-plugins
 /cc-bot:setup
 ```
 
-Restart Claude Code. **Done.**
+- Line 1 — register the plugin source (GitHub repo)
+- Line 2 — download to `~/.claude/plugins/cache/`. CC will pop a **scope selector**; pick one:
+
+  | 选项 | 适用场景 | Recommendation |
+  |---|---|---|
+  | `Install for you` (**user** scope) | You plan to use cc-bot across many projects | ✅ 日常推荐 |
+  | `Install for all collaborators` (**project** scope) | Team project, want teammates to auto-get cc-bot on clone | ✅ 团队项目 |
+  | `Install for you, in this repo only` (**local** scope) | First-time try, don't pollute other projects | ✅ 快速试用 |
+
+- Line 3 — hot-reload plugin list without restarting CC (new since CC 2.1.x; faster than `/exit` + re-open)
+- Line 4 — enter the **interactive setup wizard** (lark-cli auto-install, OAuth login, chat picker via AskUserQuestion cards, config auto-fill)
 
 > [!NOTE]
-> After install, `/reload-plugins` works without restarting.
+> 若 `/reload-plugins` 不可用或命令表仍没出现 `/cc-bot:*`，退一步 `/exit` 重开 Claude Code 即可。
 
 <details>
-<summary><b>From source (development)</b></summary>
+<summary><b>From source (development / contributors)</b></summary>
 <br/>
 
 ```bash
 git clone https://github.com/WaterTian/cc-bot.git
 ```
 
-Inside your target project, launch Claude Code with the local plugin:
+In your target project, launch Claude Code with the local plugin dir:
 
 ```bash
 cd /your/project
 claude --plugin-dir /absolute/path/to/cc-bot
 ```
 
-Then `/cc-bot:setup`.
+Then `/cc-bot:setup`. Skips marketplace install — loads straight from the local repo. Ideal for iterating on cc-bot itself.
 
 </details>
 
 <br/>
 
-## Quick Start
+## Quick Start — what `/cc-bot:setup` does
 
-Run **`/cc-bot:setup`** in your target project. The interactive wizard will:
+The wizard is fully interactive (AskUserQuestion cards, no blind typing). It walks through 6 stages:
 
 1. **Detect lark-cli** — auto-install via `npm i -g @larksuite/cli` if missing
-2. **OAuth login** — guide you through Lark Open Platform app creation (scope checklist provided), browser Device Flow login
-3. **Pick target chat** — list bot's chats via `AskUserQuestion` card, or one-click create a new chat (bot auto-joins, you become the owner)
-4. **Auto-detect IDs** — `bot_app_id` / `admin_open_id` pulled from `lark-cli auth list`, no manual entry
+2. **OAuth login** — guide you through Lark Open Platform app creation (scope checklist provided), then browser Device Flow login
+3. **Pick target chat** — list bot's chats via `AskUserQuestion` card; or one-click create a new chat (bot auto-joins, you become owner)
+4. **Auto-detect IDs** — `bot_app_id` / `admin_open_id` pulled from `lark-cli auth list`, zero manual entry
 5. **Write config** — generate `.cc-bot/profiles/active.json` + `state.json` + pre-filled `member-cache.json` + `.gitignore`
-6. **Register statusline shim** — tees stdin JSON to `hud-stdin.json` (for bot) + cc-hud rendering (if installed, for status bar)
+6. **Register statusline shim** — tees stdin JSON to `hud-stdin.json` (for bot's HUD intent) + cc-hud rendering (if installed, for status bar)
 
-Then **`/cc-bot:start`** (or just say "开bot" / "start bot" in the main session).
+Each stage is **idempotent** — rerun `/cc-bot:setup` anytime, it skips what's already done.
+
+Then **`/cc-bot:start`** (or just say "开bot" / "start bot" in the main session) — bot comes online in ≤ 5s.
 
 <br/>
 
