@@ -1,0 +1,35 @@
+{
+  "name": "cc-bot",
+  "description": "Claude Code 驱动的 IM 群 AI 项目助手 — 飞书（Lark）起步，IM 可扩展",
+  "version": "0.1.0",
+  "author": {
+    "name": "Water"
+  },
+  "commands": [
+    "./commands/setup.md",
+    "./commands/start.md",
+    "./commands/stop.md",
+    "./commands/new-profile.md",
+    "./commands/switch.md"
+  ],
+  "skills": [
+    "./skills/lark-bot"
+  ],
+  "homepage": "https://github.com/WaterTian/cc-bot",
+  "repository": "https://github.com/WaterTian/cc-bot",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "bot",
+    "lark",
+    "feishu",
+    "im",
+    "group-chat",
+    "ai-assistant",
+    "monitor",
+    "polling",
+    "windows",
+    "zero-runtime-dep"
+  ]
+}

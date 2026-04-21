@@ -1,0 +1,19 @@
+# 密钥
+key/
+*.secret.json
+.env
+.env.local
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+
+# Claude Code 本地覆盖（含本机绝对路径等项目专属 permission，不进库）
+.claude/settings.local.json

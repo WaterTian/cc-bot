@@ -1,0 +1,60 @@
+{
+  "_comment": "复制本文件为 .cc-bot/profiles/<name>.json 后按需填写，再把内容覆盖到 .cc-bot/profiles/active.json。也可以用 /cc-bot:new-profile <name> 自动生成。",
+
+  "profile_name": "example",
+  "display_name": "示例项目",
+  "description": "项目一句话描述",
+
+  "im": {
+    "_comment": "type 决定用哪个 adapter。目前支持：lark。后续可扩展 wecom / dingtalk / slack。",
+    "type": "lark",
+    "bot_app_id": "cli_xxxxxxxxxxxx",
+    "chat_id": "oc_xxxxxxxxxxxx",
+    "chat_name": "飞书群名称"
+  },
+
+  "project": {
+    "root": "D:\\Path\\To\\Project",
+    "doc_progress": "docs/项目总进度.md"
+  },
+
+  "tech_stack": {
+    "_comment": "按实际项目调整，空字段留空字符串即可",
+    "miniprogram_dir": "",
+    "admin_frontend_dir": "",
+    "backend_dir": "",
+    "cloud_functions_dir": "",
+    "deploy_script": ""
+  },
+
+  "paths": {
+    "_comment": "bot 截图/下载路径（默认集中在 .cc-bot/bot_temp/ 下，避免污染项目根）。MCP 的 qr_output 等要绝对路径时用 bot_temp_abs，lark-cli --image 要相对路径时用 bot_temp_rel。intents 描述里可直接写 <paths.bot_temp_abs>、<paths.bot_temp_rel> 占位，Claude 按 profile 替换",
+    "bot_temp_abs": "D:/Path/To/Project/.cc-bot/bot_temp",
+    "bot_temp_rel": "./.cc-bot/bot_temp"
+  },
+
+  "members": {
+    "_comment": "admin_open_ids 列出享受永久授权的管理员，其他成员按 member 处理",
+    "admin_open_ids": []
+  },
+
+  "intents": {
+    "_comment": "项目特定意图的具体执行描述。bot 收到群消息识别意图后，按本字段描述操作。未列入的意图 → 回'当前项目未配置该操作'",
+    "compile_preview": "",
+    "build_status": "",
+    "page_check": "",
+    "page_patrol": "",
+    "error_monitor": "",
+    "modify_page": "",
+    "modify_function": "",
+    "deploy_function": "",
+    "deploy_admin": "",
+    "upload_mp": "",
+    "query_test": "",
+    "query_admin_url": ""
+  },
+
+  "polling_interval_ms": 30000,
+  "mcp_required": [],
+  "notes": ""
+}

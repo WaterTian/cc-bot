@@ -1,0 +1,42 @@
+{
+  "name": "cc-bot",
+  "version": "0.1.0",
+  "description": "Claude Code 驱动的 IM 群 AI 项目助手 — 飞书（Lark）起步，IM 可扩展",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "adapters/",
+    "runtime/",
+    "commands/",
+    "skills/",
+    "templates/",
+    ".claude-plugin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "smoke": "node runtime/poll.js --project ."
+  },
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "bot",
+    "lark",
+    "feishu",
+    "im",
+    "group-chat",
+    "ai-assistant",
+    "monitor",
+    "polling",
+    "windows",
+    "zero-runtime-dep"
+  ],
+  "author": "Water",
+  "license": "MIT",
+  "homepage": "https://github.com/WaterTian/cc-bot",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WaterTian/cc-bot"
+  }
+}
