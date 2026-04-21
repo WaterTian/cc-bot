@@ -12,103 +12,101 @@
 
 适配各类项目：Web / 小程序 / Node 服务 / Python 数据管道 / 移动端等。只要能写脚本的事，`profile.intents` 都能定义。
 
+## Auto-install (for Claude Code AI agents)
+
+```
+Step 1: /plugin marketplace add WaterTian/cc-bot
+Step 2: /plugin install cc-bot@WaterTian-cc-bot
+Step 3: /cc-bot:setup
+Step 4: Restart Claude Code
+```
+
 ## 安装
 
-### 方式 1：Claude Code 插件市场（推荐，发布后）
+### 方式 1：插件市场（推荐，发布后）
 
 ```
 /plugin marketplace add WaterTian/cc-bot
 /plugin install cc-bot@WaterTian-cc-bot
 ```
 
-### 方式 2：源码（开发或早期尝鲜）
+### 方式 2：本地源码（开发 / 早期尝鲜）
 
 ```bash
 git clone https://github.com/WaterTian/cc-bot
-cd cc-bot
-# 在当前项目 Claude Code 会话里跑
-/cc-bot:setup
+# 在目标项目下启 Claude Code：
+claude --plugin-dir <绝对路径>/cc-bot
 ```
 
-## 首次配置
+## 使用
 
-1. **在目标项目**打开 Claude Code，发 `/cc-bot:setup`
-   - 会建 `.cc-bot/profiles/` 和 `.cc-bot/runtime/`、复制 template、更新 `.gitignore`
-2. **编辑** `.cc-bot/profiles/active.json`：
-   ```json
-   {
-     "im": {
-       "type": "lark",
-       "bot_app_id": "cli_xxxxxxxxxxxx",
-       "chat_id": "oc_xxxxxxxxxxxx"
-     },
-     "project": {
-       "root": "D:/Path/To/Project",
-       "doc_progress": ""
-     },
-     "members": { "admin_open_ids": ["ou_xxxx"] },
-     "intents": {
-       // 按项目自定义意图 → 动作描述，例：
-       // "deploy": "bash scripts/deploy.sh 部署到生产",
-       // "run_tests": "跑 npm test 并汇报通过数 / 失败数"
-     }
-   }
-   ```
-3. **发** `/cc-bot:start` 启动 bot（或在主会话直接说「开bot」）。
+### 首次配置（交互式向导）
 
-## 前置依赖
+在目标项目 Claude Code 会话里发 **`/cc-bot:setup`**，向导会：
 
-- **Claude Code**（本插件依赖 Skill / Monitor / TaskStop 工具）
-- **Node.js ≥ 18**
-- **飞书 CLI**：`npm i -g @larksuite/cli`，然后 `lark-cli auth login`（bot + user 身份）
-- **Git Bash**（Windows 必需 — poll.js adapter 用 bash 传 argv 避 cmd.exe 的坑）
+1. 检测 lark-cli（未装自动 `npm i -g @larksuite/cli`）
+2. 飞书开放平台建应用 + scope 清单 + 浏览器 OAuth 登录（卡片式确认）
+3. 列出 bot 所在群让你选，或一键新建群（AskUserQuestion 卡片）
+4. 自动探测 `bot_app_id` / `admin_open_id`，写入 `.cc-bot/profiles/active.json`
+5. 注册 statusline shim（接管 `~/.claude/settings.json` 的 statusLine，落盘 HUD 数据，并 tee cc-hud 渲染状态栏，若装了 cc-hud）
+6. 建 `.cc-bot/runtime/state.json` + `member-cache.json` + `.gitignore`
 
-## 命令
+配完发 **`/cc-bot:start`** 或主会话说「开bot」即可。
+
+### 命令族
 
 | 命令 | 作用 |
 |------|------|
-| `/cc-bot:setup` | 在当前项目建 `.cc-bot/` 骨架（首次用） |
-| `/cc-bot:start` | 启动 bot（开 Monitor，发上线通知） |
-| `/cc-bot:stop` | 关闭 bot（停 Monitor，发下线通知） |
+| `/cc-bot:setup` | 首次配置（交互式向导，幂等重入） |
+| `/cc-bot:start` 或 `开bot` / `启动bot` | 启 Monitor + 发上线通知 |
+| `/cc-bot:stop` 或 `关bot` / `停bot` | 停 Monitor + 发下线通知 |
 | `/cc-bot:new-profile <name>` | 从 template 生成新 profile |
-| `/cc-bot:switch <name>` | 切换激活 profile |
+| `/cc-bot:switch <name>` | 切换激活 profile（自动先关正在跑的 bot） |
 
-也可以直接在主会话发自然语言：`开bot` / `关bot` / `切换到 xxx 项目`。
+主会话也接受自然语言触发（"开bot"、"关bot"、"切换到 xxx"），经意图识别走对应 slash。
+
+## 前置依赖
+
+- **Claude Code**（用到 Skill / Monitor / TaskStop / AskUserQuestion 等工具）
+- **飞书 CLI** — `npm i -g @larksuite/cli` + `lark-cli auth login`（setup 会引导做这两步）
+- **Git Bash**（Windows）— poll.js adapter 用 bash shell 传 argv 规避 cmd.exe 的坑
+- 可选：**cc-hud** — 搭配显示状态栏（`/plugin install cc-hud@WaterTian-cc-hud` + `/cc-hud:setup`）
 
 ## 架构
 
 ```
 主会话 ── Monitor(persistent) ── node poll.js ── 每 30s IMAdapter.listRecentMessages()
                                               ├─ state.last_processed_time + poll.emitted 去重
-                                              └─ stdout: NEW_MSG|msg_id|sender|content|ts
-                                                         ↓ Monitor → notification
-                                                   主会话 → 意图判定 → adapter.sendText
+                                              └─ stdout: NEW_MSG|... → 主会话 → adapter.sendText
+
+statusline shim ── 接管 CC statusLine ── 落盘 .cc-bot/runtime/hud-stdin.json
+                                      └─ tee cc-hud（可选）渲染状态栏
 ```
 
-**HTTP 短连接** 替代 WebSocket — vpn 代理下 WS 会被静默断流，HTTP 稳定。响应延迟 ≤ 30s。
-
-**三层防御**：PID lockfile 单例 / stdout EPIPE 自杀 / state 未来值自愈。
-
-## 扩展新 IM
-
-当前只实现了飞书 adapter。加企业微信 / 钉钉 / Slack / Discord 的流程：
-
-1. 在 `adapters/` 新增 `<im>.js`，继承 `IMAdapter` 实现全部方法
-2. 在 `runtime/poll.js` 的 adapter factory 加分支：`if (im.type === '<im>') ...`
-3. profile 的 `im.type` 设为新 IM 名
-4. 在 `skills/lark-bot/SKILL.md` 类似地加 `<im>-bot/SKILL.md`（或扩展现有 SKILL）
-
-adapter 接口定义见 `adapters/base.js`。
+**HTTP 短连接** 替代 WebSocket（vpn 代理下 WS 易静默断流，HTTP 稳定）。**三层防御**：PID lockfile 单例 / stdout EPIPE 自杀 / state 未来值自愈。
 
 ## 项目无关性
 
 | 模块 | 位置 | 跟谁走 |
 |------|------|--------|
-| SKILL / adapter / poll.js / commands | `${CLAUDE_PLUGIN_ROOT}/` | 插件版本 |
-| 群 ID / 项目根 / 成员 / 意图映射 | `<project>/.cc-bot/profiles/active.json` | 每项目 |
-| state / 缓存 / pid / 去重 | `<project>/.cc-bot/runtime/` | 每项目（gitignore） |
+| SKILL / adapter / poll.js / commands / templates | `${CLAUDE_PLUGIN_ROOT}/` | 插件版本 |
+| 群 ID / 项目根 / 成员 / 意图映射 | `<project>/.cc-bot/profiles/active.json` | 每项目（gitignore） |
+| state / 缓存 / pid / 去重 / bot_temp | `<project>/.cc-bot/runtime/` + `.cc-bot/bot_temp/` | 每项目（gitignore） |
 
-一套插件，多个项目同时用互不打架。
+一套插件，多项目并行使用互不污染。
+
+## 扩展新 IM
+
+当前仅飞书 adapter。加企业微信 / 钉钉 / Slack / Discord 的流程：
+
+1. `adapters/<im>.js` 继承 `IMAdapter`（见 `adapters/base.js`）实现 `listRecentMessages / sendText / sendImage / downloadResource / getUser`
+2. `runtime/poll.js` 的 adapter factory 加 `if (im.type === '<im>')` 分支
+3. profile 的 `im.type` 填对应 IM 名
+4. 新增 `skills/<im>-bot/SKILL.md` 或复用现有
+
+## 隐私防护
+
+仓库自带 pre-commit 扫描脚本，阻止真实 IM ID / 真名 / api secret 误入 commit。开发者本地一次性装（见 CLAUDE.md §Git 提交隐私防护）。
 
 ## License
 
