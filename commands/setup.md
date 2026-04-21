@@ -133,25 +133,19 @@ AskUserQuestion({
    - User picked an existing chat → record **CHAT_ID** / **CHAT_NAME** from that option, proceed to Stage E.
    - User picked **新建一个群** → go to **D.new**.
 
-5. **If N ≥ 4**: 仍然用 AskUserQuestion（**不降级成文字编号**，用户体验一致）。展示**最新 3 个群**（按 `data.items` 原始顺序取前 3，API 已按 create_time desc）+「新建一个群」，并在 question 文案里告知全部群数以及如何选不在列表里的：
+5. **If N ≥ 4**（卡片装不下所有群+新建，降级为文字编号让所有群都可见）：
    ```
-   AskUserQuestion({
-     questions: [{
-       question: "选择 bot 监听的目标群（bot 在 {N} 个群中，仅列最近 3 个；其他群需手动编辑 .cc-bot/profiles/active.json 填 chat_id）",
-       header: "目标群",
-       multiSelect: false,
-       options: [
-         { label: "{chat_name_1}", description: "chat_id: {chat_id_1}" },
-         { label: "{chat_name_2}", description: "chat_id: {chat_id_2}" },
-         { label: "{chat_name_3}", description: "chat_id: {chat_id_3}" },
-         { label: "新建一个群", description: "自动创建新群并把你加为群主" }
-       ]
-     }]
-   })
+   bot 所在的群：
+   1. {名字1} ({chat_id_1})
+   2. {名字2} ({chat_id_2})
+   ...
+   N. {名字N} ({chat_id_N})
+   N+1. 新建一个群
+   请回复编号选择目标群（如 "1"）。
    ```
-   - 用户选已列出的群 → record **CHAT_ID** / **CHAT_NAME**
-   - 选「新建一个群」→ **D.new**
-   - 用户想选不在列表中的群 → 告诉他："目前列表只展示最近 3 个，若目标群在更早的群中，setup 结束后编辑 `.cc-bot/profiles/active.json` 把 `im.chat_id` 改为目标 chat_id 即可（用 `lark-cli im chats list --as bot` 查完整列表）"
+   等用户数字回复：
+   - 选 **N+1** → **D.new**
+   - 选其他编号 → record **CHAT_ID** / **CHAT_NAME** 从 items[编号-1]
 
 ### Sub-flow D.new — 创建新群
 
