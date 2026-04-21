@@ -103,8 +103,12 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
 
 ### 开关通知
 
-- 开启：`cc-bot 已上线` + 模型/上下文进度条 + `发送「帮助」查看支持的操作`
-- 关闭：`cc-bot 已下线` + `Bot 进入休眠，群消息将不再响应`
+- 开启：`cc-bot 已上线` + 模型/上下文进度条（HUD 可用时）+ `发送「帮助」查看支持的操作`
+- 关闭：`cc-bot 已下线` + 模型/上下文进度条（HUD 可用时）+ `Bot 进入休眠，群消息将不再响应`
+
+两种通知的 HUD 段格式一致（见 §HUD 的字段来源 / 模型显示规则 / 进度条）。HUD 不可用时都**静默**省略这两行、不贴安装命令到群里。
+
+**主会话 shim 排查提示仅在开启场景触发**（/cc-bot:start 上线通知拼 HUD 段失败、群里显式问"状态/HUD"、开发者主动调试 HUD）。关闭场景 HUD 缺失**不输出**工程提示——用户正在关 bot，此时刷排查信息没意义。
 
 ## 运行时文件
 
@@ -168,7 +172,7 @@ Claude 用自然语言理解判定意图，不做关键词匹配。
 | `query_progress` | "进度怎样"、"做到哪了" | 读 `{profile.project.root}/{profile.project.doc_progress}` |
 | `query_todo` | "待办"、"还有什么没做" | 从 doc_progress 提取未完成项 |
 | `hud` | "状态"、"HUD" | 推送会话状态（见 §HUD） |
-| `help` | "帮助"、"能做什么" | 返回操作列表（含本 profile 的具体 intents） |
+| `help` | "帮助"、"能做什么" | 返回**可用**操作列表（按 §帮助动态筛选规则） |
 | `bot_switch` | "关闭bot"、"暂停" | **拒绝**，回"开关指令请从 Claude Code 主会话发起" |
 | `visual_bug_report` | 文字 + 截图（含 `[Image: img_xxx]`） | 下载图片 → Read → 结合文字判意图 |
 | `unknown` | 无法识别 | 回"无法识别该指令，发送「帮助」查看支持的操作" |
@@ -178,6 +182,19 @@ Claude 用自然语言理解判定意图，不做关键词匹配。
 常见键：`compile_preview` / `build_status` / `page_check` / `page_patrol` / `error_monitor` / `modify_page` / `modify_function` / `deploy_function` / `deploy_admin` / `upload_mp` / `query_test` / `query_admin_url`。
 
 Claude 按 `profile.intents.<key>` 字段描述的具体命令/步骤操作。profile 未定义的意图 → 回"当前项目未配置该操作，请检查 profile.intents"。
+
+### 帮助动态筛选规则
+
+触发"帮助"意图时，**根据当前 profile 实际配置**动态生成清单，**不列不能用的意图**，避免用户"点了说未配置"的错路：
+
+| 意图 | 仅当以下条件满足才列出 |
+|------|---|
+| `query_progress` / `query_todo` | `profile.project.doc_progress` 非空且文件存在 |
+| `query_admin_url` / `deploy_admin` | `profile.intents.query_admin_url` / `deploy_admin` 非空字符串 |
+| `compile_preview` / `build_status` / `page_check` / `page_patrol` / `error_monitor` / `modify_page` / `modify_function` / `deploy_function` / `upload_mp` / `query_test` | 同上，`profile.intents.<key>` 非空才列 |
+| `hud` / `help` | 永久可用（不依赖 profile 字段） |
+
+**最小可用清单**（新项目刚 setup，intents 全空 + doc_progress 空）应该至少包含 `状态 / 帮助`（加一句"可在 .cc-bot/profiles/active.json 配置 intents 开启更多能力"），而不是罗列一堆未配置项。
 
 #### 占位符约定
 
@@ -502,7 +519,12 @@ HUD 数据由独立插件 **cc-hud** 写入 `.cc-bot/runtime/hud-stdin.json`。c
 HUD 数据暂不可用
 ```
 
-**同时在主会话里**向开发者输出一条工程提示（每次 hud 场景命中 fallback 都提示，包括：上线通知拼 HUD 段失败、群里显式问「状态/HUD」、开发者主动调试 HUD）。
+**同时在主会话里**向开发者输出一条工程提示，**仅以下场景触发**：
+- `/cc-bot:start` 上线通知拼 HUD 段失败
+- 群里显式问「状态/HUD」
+- 开发者主动调试 HUD
+
+**不触发的场景：** `/cc-bot:stop` 下线通知（用户正在关 bot，此时刷排查信息没意义）。
 
 HUD 数据由 cc-bot 自己的 statusline shim（`runtime/statusline.js`）落盘。检测 shim 是否已注册到 `~/.claude/settings.json`：
 
