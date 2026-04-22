@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <a href="#install"><img src="https://img.shields.io/badge/install-3_commands-blueviolet?style=flat-square" alt="install" /></a>
+  <a href="#install"><img src="https://img.shields.io/badge/install-4_commands-blueviolet?style=flat-square" alt="install" /></a>
   &nbsp;
   <img src="https://img.shields.io/badge/im-lark%20%C2%B7%20extensible-blue?style=flat-square" alt="im" />
   &nbsp;
@@ -168,7 +168,7 @@ Then `/cc-bot:setup`. Skips marketplace install — loads straight from the loca
 
 ## Quick Start — what `/cc-bot:setup` does
 
-The wizard is fully interactive (AskUserQuestion cards, no blind typing). It walks through 6 stages:
+Setup prints a version banner on start (`cc-bot v<X.Y.Z> setup — <project>`, since v0.1.4) then runs through these steps — fully interactive via `AskUserQuestion` cards, no blind typing:
 
 1. **Detect lark-cli** — auto-install via `npm i -g @larksuite/cli` if missing
 2. **OAuth login** — guide you through Lark Open Platform app creation (scope checklist provided), then browser Device Flow login
@@ -176,10 +176,11 @@ The wizard is fully interactive (AskUserQuestion cards, no blind typing). It wal
 4. **Auto-detect IDs** — `bot_app_id` / `admin_open_id` pulled from `lark-cli auth list`, zero manual entry
 5. **Write config** — generate `.cc-bot/profiles/active.json` + `state.json` + pre-filled `member-cache.json` + `.gitignore`
 6. **Register statusline shim** — tees stdin JSON to `hud-stdin.json` (for bot's HUD intent) + cc-hud rendering (if installed, for status bar)
+7. **Register Monitor permission** (v0.1.3+) — append a wildcard rule to `<project>/.claude/settings.local.json`, so cc-bot version upgrades never re-prompt for Monitor launch permission
 
-Each stage is **idempotent** — rerun `/cc-bot:setup` anytime, it skips what's already done.
+Every step is **idempotent** — rerun `/cc-bot:setup` anytime, it skips what's already done.
 
-Then **`/cc-bot:start`** (or just say "开bot" / "start bot" in the main session) — bot comes online in ≤ 5s.
+Then **`/cc-bot:start`** (or just say "开bot" / "start bot" in the main session) — bot comes online in ≤ 5s. Group notification shows `cc-bot v<X.Y.Z> 已上线`.
 
 <br/>
 
@@ -251,7 +252,7 @@ Works for **any project type** — Web / mini-program / Node service / Python da
 
 ## 快速开始（中文）
 
-在目标项目里运行 **`/cc-bot:setup`**，交互式向导会：
+在目标项目里运行 **`/cc-bot:setup`**，开场一行打印当前版本（`cc-bot v<X.Y.Z> setup — <project>`，v0.1.4 起），然后交互式向导会：
 
 1. **检测 lark-cli** — 未装自动 `npm i -g @larksuite/cli`
 2. **OAuth 登录引导** — 带你去飞书开放平台建应用（附必需 scope 清单），完成浏览器 Device Flow 登录
@@ -259,8 +260,9 @@ Works for **any project type** — Web / mini-program / Node service / Python da
 4. **自动探测 ID** — `bot_app_id` / `admin_open_id` 从 `lark-cli auth list` 直接取，不用手填
 5. **写配置** — 生成 `.cc-bot/profiles/active.json` + `state.json` + 预填 `member-cache.json` + `.gitignore`
 6. **注册 statusline shim** — 落盘 stdin JSON（给 bot 用）+ 可选透传 cc-hud（渲染状态栏）
+7. **注册 Monitor 通配权限**（v0.1.3+）— 向 `<project>/.claude/settings.local.json` append 通配规则，cc-bot 版本升级不再弹 Monitor 启动权限询问
 
-然后 **`/cc-bot:start`**（或主会话直接说「开bot」）。
+然后 **`/cc-bot:start`**（或主会话直接说「开bot」）。群里上线通知首行是 `cc-bot v<X.Y.Z> 已上线`。
 
 <br/>
 
