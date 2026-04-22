@@ -113,6 +113,32 @@ Inside Claude Code **in your target project**, run these in order:
 > [!NOTE]
 > 若 `/reload-plugins` 不可用或命令表仍没出现 `/cc-bot:*`，退一步 `/exit` 重开 Claude Code 即可。
 
+<br/>
+
+## Updating
+
+When a new release is announced, run these in **each project** using cc-bot:
+
+```
+/plugin marketplace update cc-bot    # refresh manifest (detects new version)
+/plugin update cc-bot@cc-bot         # fetch new version into cache
+/reload-plugins                      # apply in current session
+```
+
+Prefer running **`/cc-bot:doctor`** first — it compares your installed version with the latest GitHub release and prints the upgrade hint if drifted, plus flags any stale permissions or profile issues.
+
+### One-time: stable permission pattern
+
+CC's plugin cache is version-indexed (`~/.claude/plugins/cache/cc-bot/cc-bot/<version>/`). After each upgrade the Monitor launch path points to a new version dir, so CC re-prompts for permission. To skip prompts forever, when CC first asks permission for a `Bash(node .../poll.js ...)` call, choose **"Always allow matching pattern"** and enter:
+
+```
+Bash(node */cache/cc-bot/cc-bot/*/runtime/poll.js --project *)
+```
+
+The wildcards match any future version + any project path; you only grant once.
+
+<br/>
+
 <details>
 <summary><b>From source (development / contributors)</b></summary>
 <br/>
@@ -183,6 +209,7 @@ CC's statusLine ── cc-bot shim ── write hud-stdin.json (for bot's HUD in
 | `/cc-bot:stop` · `关bot` / `stop bot` | Stop Monitor + send offline notification |
 | `/cc-bot:new-profile <name>` | Create new profile from template |
 | `/cc-bot:switch <name>` | Switch active profile (auto-stops running bot first) |
+| `/cc-bot:doctor` | Read-only health check — version drift, profile validity, runtime state, zombie permissions, shim registration |
 
 Main session also accepts natural-language triggers (`开bot` / `关bot` / `switch to xxx`).
 
