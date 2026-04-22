@@ -4,6 +4,14 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.4] - 2026-04-22
+
+- docs: README 加 version badge（shields.io GitHub tag）
+- docs: README 同步 v0.1.3/0.1.4 UX 改动
+- docs: README Updating 段加升级后版本验证指引
+- feat: 上下线通知也带版本号
+- feat: /cc-bot:setup 开场显示版本号，完成提示也带版本
+
 ## [0.1.3] - 2026-04-22
 
 - feat: /cc-bot:setup step 9 自动注册 Monitor 通配权限
