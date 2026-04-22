@@ -96,15 +96,17 @@ cp scripts/blocklist.txt.example scripts/blocklist.txt
 一键 bump 脚本 `scripts/release.js`：原子更新 `plugin.json` + `marketplace.json` + `package.json` 三处版本号、prepend CHANGELOG.md、commit、tag。
 
 ```bash
-npm run release patch          # 0.1.1 → 0.1.2（默认不推，手工 git push）
-npm run release patch --push   # 一把梭：写文件 + commit + tag + push main + push tag
-npm run release minor --dry    # 预览，不写文件（看 changelog entry 合理再执行）
-npm run release 0.2.0          # 指定具体版本号
+node scripts/release.js patch          # 0.1.1 → 0.1.2（默认不推，手工 git push）
+node scripts/release.js patch --push   # 一把梭：写文件 + commit + tag + push main + push tag
+node scripts/release.js minor --dry    # 预览，不写文件（看 changelog entry 合理再执行）
+node scripts/release.js 0.2.0          # 指定具体版本号
 ```
+
+**一定要用 `node scripts/release.js` 直接调**，不要走 `npm run release`。原因：`npm run release patch --dry` 里 `--dry` 会被 npm 吞掉不传给脚本（见 memory `feedback_npm_run_flag_passthrough`），导致本来想 dry 预览的误跑成真实 release。若坚持走 npm，用 `npm run release -- patch --dry`（`--` 分隔符原样转发）。
 
 preflight 校验：必须在 main 分支、工作区干净、目标 tag 不存在。
 
-发版顺序：① 业务/功能性 commit 先做完、全部推上 main → ② 跑 `npm run release` bump → ③ 使用 cc-bot 的项目按 README §Updating 跑 3 条命令拉新版。
+发版顺序：① 业务/功能性 commit 先做完、全部推上 main → ② `node scripts/release.js <bump>` bump → ③ 使用 cc-bot 的项目按 README §Updating 跑 3 条命令拉新版。
 
 ## 先决条件（使用 cc-bot 的项目需要）
 
