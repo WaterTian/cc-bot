@@ -91,6 +91,21 @@ cp scripts/blocklist.txt.example scripts/blocklist.txt
 
 扫描规则：飞书真实 ID (`cli_/ou_/oc_/om_` + 14 位以上 hex) + blocklist 子串 + `app_secret/api_key/bearer token` 正则。命中即 `exit 1`。确需绕过用 `git commit --no-verify`（谨慎）。
 
+## 发版流程（维护者）
+
+一键 bump 脚本 `scripts/release.js`：原子更新 `plugin.json` + `marketplace.json` + `package.json` 三处版本号、prepend CHANGELOG.md、commit、tag。
+
+```bash
+npm run release patch          # 0.1.1 → 0.1.2（默认不推，手工 git push）
+npm run release patch --push   # 一把梭：写文件 + commit + tag + push main + push tag
+npm run release minor --dry    # 预览，不写文件（看 changelog entry 合理再执行）
+npm run release 0.2.0          # 指定具体版本号
+```
+
+preflight 校验：必须在 main 分支、工作区干净、目标 tag 不存在。
+
+发版顺序：① 业务/功能性 commit 先做完、全部推上 main → ② 跑 `npm run release` bump → ③ 使用 cc-bot 的项目按 README §Updating 跑 3 条命令拉新版。
+
 ## 先决条件（使用 cc-bot 的项目需要）
 
 - `lark-cli` 已全局安装并完成 `auth login`（bot + user 身份）

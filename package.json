@@ -13,10 +13,12 @@
     "templates/",
     ".claude-plugin/",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
-    "smoke": "node runtime/poll.js --project ."
+    "smoke": "node runtime/poll.js --project .",
+    "release": "node scripts/release.js"
   },
   "keywords": [
     "claude-code",
