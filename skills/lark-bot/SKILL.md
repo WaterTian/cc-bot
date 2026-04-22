@@ -119,7 +119,7 @@ Read profile  ──┐
 
 **上线通知**（/cc-bot:start，HUD 可用时）：
 ```
-cc-bot 已上线
+cc-bot v{version} 已上线
 模型: {model_display_name}
 上下文: {bar} X% ({used} / {total})
 
@@ -128,12 +128,14 @@ cc-bot 已上线
 
 **下线通知**（/cc-bot:stop，HUD 可用时）：
 ```
-cc-bot 已下线
+cc-bot v{version} 已下线
 模型: {model_display_name}
 上下文: {bar} X% ({used} / {total})
 
 Bot 进入休眠，群消息将不再响应
 ```
+
+**`{version}` 字段来源**：Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` 的 `version`。让群成员和开发者一眼看到当前 bot 版本，避免"你在跑哪个版本"这类反复追问。HUD 不可用时 version 仍保留在首行（版本是静态信息，不依赖 HUD）。
 
 **字段规则：**
 - 模型 / 上下文字段来源、模型 fallback、进度条 / 百分比 / 绝对值格式均同 §HUD 状态推送的「字段来源 / 模型显示规则 / 进度条」

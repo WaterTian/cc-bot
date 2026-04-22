@@ -9,7 +9,9 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
 
 ### 执行
 
-1. **Read** `.cc-bot/profiles/active.json`（拿 `im.chat_id`、`im.bot_app_id`、`project.root`、`paths.bot_temp_abs`）
+1. **并行 Read**：
+   - `.cc-bot/profiles/active.json`（拿 `im.chat_id`、`im.bot_app_id`、`project.root`、`paths.bot_temp_abs`）
+   - `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`（拿 `version`，用于上线通知标题）
 
 2. **并行发起以下 5 个操作（同一响应的多 tool call）：**
    - Edit `.cc-bot/runtime/state.json`: `paused=false, monitor_task_id=null`
@@ -21,7 +23,7 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
      LARK_CLI_NO_PROXY=1 lark-cli im +messages-send --as bot \
        --chat-id <chat_id> \
        --msg-type text \
-       --content '{"text":"cc-bot 已上线\n模型: {model_display_name}\n上下文: {bar} X% ({used} / {total})\n\n发送「帮助」查看支持的操作"}'
+       --content '{"text":"cc-bot v{version} 已上线\n模型: {model_display_name}\n上下文: {bar} X% ({used} / {total})\n\n发送「帮助」查看支持的操作"}'
      ```
      - **关键**：`--content` 的值用 **bash 单引号**包 JSON 字符串（单引号内 shell 不做任何转义）；JSON 字符串里 `\n` 是标准转义，lark-cli `JSON.parse()` 后还原为真换行
      - `模型`: 读 hud-stdin.json 的 `model.display_name`；缺失时按 SKILL.md §模型显示规则 fallback 到 id 映射，再缺就用 `Claude Code`
