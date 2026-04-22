@@ -9,6 +9,18 @@ Run all bash commands with `LARK_CLI_NO_PROXY=1` prefix to avoid vpn/proxy issue
 
 ---
 
+## Preamble — 报版本
+
+在进入 Stage 0 前，Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` 拿 `version`，向用户输出一行开场：
+
+```
+cc-bot v{version} setup — {当前项目目录名}
+```
+
+目的：用户一眼知道当前跑的 cc-bot 版本，遇到问题报 issue 时附上这行即可。
+
+---
+
 ## Stage 0 — 确定 IM 工具
 
 Current cc-bot only ships a single IM adapter (飞书 / lark). **Silently set `IM_TYPE = lark` and proceed directly to Stage A** — do NOT print a prompt, do NOT call `AskUserQuestion`.
@@ -294,7 +306,7 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
 
    共通部分：
    ```
-   ✓ cc-bot 配置完成（IM：飞书）
+   ✓ cc-bot v{version} 配置完成（IM：飞书）
 
    应用    {BOT_APP_ID}
    群      {CHAT_NAME}（{CHAT_ID}）
