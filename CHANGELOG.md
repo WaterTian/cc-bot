@@ -4,6 +4,11 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.3] - 2026-04-22
+
+- feat: /cc-bot:setup step 9 自动注册 Monitor 通配权限
+- docs: CLAUDE.md 发版示例改用 node scripts/release.js 直接调
+
 ## [0.1.2] - 2026-04-22
 
 - feat: 加 scripts/release.js 一键发版脚本 + CHANGELOG.md
