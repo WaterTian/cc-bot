@@ -127,15 +127,19 @@ When a new release is announced, run these in **each project** using cc-bot:
 
 Prefer running **`/cc-bot:doctor`** first — it compares your installed version with the latest GitHub release and prints the upgrade hint if drifted, plus flags any stale permissions or profile issues.
 
-### One-time: stable permission pattern
+### Stable permission pattern (auto-registered since v0.1.3)
 
-CC's plugin cache is version-indexed (`~/.claude/plugins/cache/cc-bot/cc-bot/<version>/`). After each upgrade the Monitor launch path points to a new version dir, so CC re-prompts for permission. To skip prompts forever, when CC first asks permission for a `Bash(node .../poll.js ...)` call, choose **"Always allow matching pattern"** and enter:
+CC's plugin cache is version-indexed (`~/.claude/plugins/cache/cc-bot/cc-bot/<version>/`). After each upgrade the Monitor launch path points to a new version dir, so CC would otherwise re-prompt for permission.
+
+**Since v0.1.3**, `/cc-bot:setup` auto-writes the following wildcard rule to `<project>/.claude/settings.local.json`:
 
 ```
-Bash(node */cache/cc-bot/cc-bot/*/runtime/poll.js --project *)
+Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)
 ```
 
-The wildcards match any future version + any project path; you only grant once.
+You won't be prompted for Monitor on any future version upgrade.
+
+**For v0.1.2 or earlier installs** (pre-auto): after you update to v0.1.3+, re-run `/cc-bot:setup` — step 9 is idempotent and will append the rule. Or add it manually.
 
 <br/>
 

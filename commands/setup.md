@@ -264,13 +264,33 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
 
    e. Tell user: `✓ statusline shim 已注册到 ~/.claude/settings.json（下次 CC 重启生效；或立即重新打开会话）`
 
-9. **检测 cc-hud 安装状态**（决定完成提示里附加哪段 hint）：
+9. **注册 Monitor 通配权限**到 `<project>/.claude/settings.local.json`，让 cc-bot 版本升级后不再被 CC 反复询问权限。
+
+   a. Read `<project>/.claude/settings.local.json`。文件缺失 → 初值 `{}`；解析失败 → 直接报错「settings.local.json 格式错误，请先修复」并跳过本步（不能强写覆盖用户数据）。
+
+   b. 确保 `permissions.allow` 是数组（缺失则创建 `permissions: { allow: [] }`）。
+
+   c. 构造通配规则（按平台；Windows 为主，同时加 Unix 模板兼顾未来跨平台）：
+      - Windows：`Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)`
+      - 当前只写 Windows 模板即可（cc-bot 主要用户在 Windows；Mac/Linux 适配后再补）
+
+   d. 扫 `permissions.allow[]`：
+      - 若**已有完全相同**的通配规则 → ✓ 幂等跳过
+      - 若有包含 `cache/cc-bot/cc-bot/<具体数字版本号>/runtime/poll.js` 的硬编码规则 → **不自动删**（尊重用户手工授权历史；提示"检测到 X 条硬编码版本路径，建议换为通配"即可。自动清理交给 `/cc-bot:doctor --fix` 未来实现）
+      - 否则 → append 通配规则到数组末尾，Write 回去
+
+   e. Tell user：
+      - 首次注册 → `✓ 已加通配 Monitor 权限到 .claude/settings.local.json（升级 cc-bot 版本不会再弹权限询问）`
+      - 幂等跳过 → `✓ Monitor 通配权限已就位（跳过）`
+      - 发现硬编码僵尸 → `⚠ 检测到 N 条硬编码版本路径的旧权限规则（位置 .claude/settings.local.json）。建议手工替换为通配：\nBash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)`
+
+10. **检测 cc-hud 安装状态**（决定完成提示里附加哪段 hint）：
    ```bash
    grep -q '"cc-hud@' ~/.claude/plugins/installed_plugins.json 2>/dev/null && echo installed || echo not_installed
    ```
    设 **HUD_STATE** = `installed` 或 `not_installed`。
 
-10. Tell user（根据 HUD_STATE 拼出对应 hint）：
+11. Tell user（根据 HUD_STATE 拼出对应 hint）：
 
    共通部分：
    ```
@@ -307,5 +327,6 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
 - **Stage E** `active.json` 存在且字段非占位符（`im.bot_app_id` 匹配 `/^cli_[a-z0-9]+$/` 且**不是** `cli_xxxxxxxxxxxx` 示例；`im.chat_id` 以 `oc_` 开头且长度 > 20）→ 输出「已配置，可 /cc-bot:start」。**仍需复查**：
   - 若 `settings.json` 的 `statusLine.command` 未指向 cc-bot shim → 跑步骤 8 补注册（幂等，可重复）
   - 若 `.cc-bot/runtime/member-cache.json` 缺失 → 跑步骤 6 补写入
+  - 若 `.claude/settings.local.json` 无 Monitor 通配权限规则 → 跑步骤 9 补注册（幂等）
 
 用户任何阶段失败后修好，再发 `/cc-bot:setup` 会自动从断点续跑。
