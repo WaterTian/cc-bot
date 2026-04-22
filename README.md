@@ -123,9 +123,11 @@ When a new release is announced, run these in **each project** using cc-bot:
 /plugin marketplace update cc-bot    # refresh manifest (detects new version)
 /plugin update cc-bot@cc-bot         # fetch new version into cache
 /reload-plugins                      # apply in current session
+/cc-bot:doctor                       # verify: first line prints "cc-bot v<new-version>"
 ```
 
-Prefer running **`/cc-bot:doctor`** first — it compares your installed version with the latest GitHub release and prints the upgrade hint if drifted, plus flags any stale permissions or profile issues.
+- **Before upgrading** — run `/cc-bot:doctor` first; it compares installed version with the latest GitHub release and prints the upgrade hint if drifted, plus flags stale permissions or profile issues.
+- **After upgrading** — run `/cc-bot:doctor` again to confirm the new version is active; or run `/cc-bot:start` and the group online notification will show `cc-bot v<new-version> 已上线`. Setup's greeting + completion lines also carry `v<version>` (since v0.1.4) for the same reason.
 
 ### Stable permission pattern (auto-registered since v0.1.3)
 
