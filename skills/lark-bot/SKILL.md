@@ -94,17 +94,13 @@ Read profile  ──┐
    - Bash 发上线通知：**必须用 `--msg-type text --content '{"text":"..."}'` JSON 方式**，不要用 `--text "..."` + `$'...\n...'`（Windows Git Bash 下 `$''` 转义不稳，会发成字面 `\n`）。示例见 commands/start.md
 3. **Monitor 返回 task_id 后**：再发一次 Edit 把 `monitor_task_id` 回写到 state.json
 
-#### 明确**不做**的事（及回滚条件）
+#### 明确**不做**的事
 
 - ❌ **不清孤儿进程** — poll.js 的 PID lockfile（三层防御①）启动时自检活进程即 `exit 0`，无需主会话跑 `powershell Get-CimInstance`（慢 2-5s）
-  - **回滚条件**：若实战中观察到以下任一症状就恢复主会话清孤儿（见 git blame 本段或 commit `a7f0b4b` 之前版本）：
-    - 多个同 project 的 `node runtime/poll.js` 同时在跑（`tasklist` 看到 ≥ 2 个）
-    - `poll.emitted` 去重表被重复写入造成同一消息多次推送
-    - `BOT_INFO|poll.js|lock-taken-by-pid-*` notification 频繁出现但老 pid 实际已死
-- ❌ **不跑 `TaskOutput` 验证 running 状态** — Monitor 启动无 error 即视为成功；若 poll.js 内部报错，下一轮轮询它会 emit `BOT_ERROR|poll.js|...` 到 Monitor stdout，主会话自然收到 notification 再处理
-  - **回滚条件**：若观察到 Monitor 启动成功但 poll.js 实际未跑起来（群消息 60s+ 无 NEW_MSG 推送，TaskGet 看 task 状态异常），就加回 `TaskOutput(task_id, block:false)` 验证
-- ❌ **不做冗余自检**（lark-cli --version 等）— setup 已验过；如 profile / project.root 真有问题，第一次 lark-cli 调用会报错，届时再处理
-  - **回滚条件**：若用户常见报错是"setup 跑过但 lark-cli 后来被卸载/PATH 变了"这种漂移问题，再加回版本自检
+- ❌ **不跑 `TaskOutput` 验证 running 状态** — Monitor 启动无 error 即视为成功；若 poll.js 内部报错，下一轮轮询它会 emit `BOT_ERROR|poll.js|...` 到 Monitor stdout
+- ❌ **不做冗余自检**（lark-cli --version / 路径存在性等）— setup 已验过，真失败时下游第一次 lark-cli 调用会报
+
+> 这三条的回滚条件（何时恢复旧版清孤儿 / TaskOutput 验证）详见 `commands/start.md`。
 
 #### 异常路径
 
@@ -140,11 +136,7 @@ Bot 进入休眠，群消息将不再响应
 ```
 
 **字段规则：**
-- 模型 — `hud.model.display_name`（缺失按 §模型显示规则 fallback）
-- 上下文：
-  - `{bar}` 进度条：`█` × round(percent/10) + `░` 补满总宽 10（例 7% → `█░░░░░░░░░`；13% → `█▎░░░░░░░░` 也可用 `█░░...` 整数档位更简单）
-  - `X%` 整数百分比（`context_window.used_percentage`）
-  - `({used} / {total})` 绝对值：`current_usage` 各类 token 加总 / `context_window.context_window_size`，人类可读缩写（例 `69K / 1M`、`130K / 200K`）
+- 模型 / 上下文字段来源、模型 fallback、进度条 / 百分比 / 绝对值格式均同 §HUD 状态推送的「字段来源 / 模型显示规则 / 进度条」
 - HUD 不可用时两通知都**静默**省略模型 + 上下文两行（保留首行和末行）；不贴安装命令到群里
 
 进度条 / 百分比 / 绝对值三段样式**上下线通知与群问 HUD 的完整状态卡一致**（见 §HUD 状态推送），避免用户在不同场景看到不同格式造成混淆。
@@ -180,6 +172,21 @@ Bot 进入休眠，群消息将不再响应
 **admin 判定：** `role=admin` 必须满足 open_id 同时在 `profile.members.admin_open_ids` 白名单里。缓存为空时新消息按 `role=member` 处理，直到 admin 白名单确认后升级。
 
 回复群消息时用 `member-cache.json` 里的真实 `name` 称呼对方（产品体验例外，不算泄露）。
+
+**格式示例**（实际真名应为群成员真实姓名，这里用角色占位；`setup` 完毕后默认只有管理员一条）：
+
+```json
+{
+  "ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": { "name": "张开发", "role": "admin" },
+  "ou_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy": { "name": "李项目", "role": "admin" },
+  "ou_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz": { "name": "王测试", "role": "member" }
+}
+```
+
+- 键 = 飞书 `open_id`（`ou_` 前缀 + 32 位 hex）
+- `name` = `lark-cli contact +get-user` 返回的 `name` / `en_name`
+- `role` = `admin`（白名单内）或 `member`（默认）
+- 新成员首次发言时按 §处理消息 SOP step 3 自动追加条目
 
 ### 权限矩阵（按 intent 类别，具体键由 profile.intents 自定义）
 
@@ -369,7 +376,7 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 30s 主
 2. **poll.js 连续失败告警**：主会话收到 `BOT_ERROR|poll.js|lark-cli 连续失败 N 次` notification
 3. **用户主动问"群里有消息吗 / 新消息吗 / hello?"**：不凭记忆回答，立即 fetch 核对（和「最高优先级规则 2」的 fetch_before_reply 一致）
 
-老架构下的"每 turn 主动 tail events.log" 已**废弃**——events.log 在 polling 架构下不再是事件源，仅保留为过渡期审计日志。`poll.emitted` 是 poll.js 内部去重表，**绝不要手动清空**（会导致历史消息被当新消息重推刷屏）。
+`poll.emitted` 是 poll.js 内部去重表，**绝不要手动清空**（会导致历史消息被当新消息重推刷屏）。
 
 **Monitor push 与 API 兜底结果冲突时以 API 为准。**
 
@@ -644,5 +651,27 @@ CC: v2.1.112
 - lark-cli 回复失败 → 跳过继续
 - 操作超时（>2 min）→ 回"操作超时，请稍后重试"
 - 状态文件损坏 → 重建默认状态 `{"last_processed_time":"0","pending_confirm":null,"paused":true}`
-- Monitor 退出 → 重新启动
 - `.cc-bot/profiles/active.json` 缺失 → 回"未配置 profile，请先复制 template.json 或切换项目"
+
+### Monitor 异常重启
+
+Monitor persistent task 意外退出（群消息长时间无 NEW_MSG 推送、用户问"群里有消息吗"时发现 bot 不响应），按以下步骤重开：
+
+1. **取 task_id**：先 Read `.cc-bot/runtime/state.json.monitor_task_id`；有值 → 直接 `TaskGet(task_id)`；无值 / 值已失效 → `TaskList` 找描述含 `poll.js` 的 persistent task 作为兜底
+2. **按状态分支**：
+   - `failed` / `completed` → 走下一步重启
+   - `running` 但 poll.js 内部卡死 → `TaskStop(task_id)` 再走下一步
+   - `running` 正常 + tick 刚发过消息 → Monitor 没问题，按顺序排查：① `lark-cli auth list` 看 token 是否过期；② Read `profile.active.json` 看 `im.chat_id` / `im.bot_app_id` 字段是否被误改
+3. **重新启动**（命令与 `/cc-bot:start` 完全一致）：
+   ```
+   Monitor(
+     command: node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <profile.project.root>,
+     description: cc-bot poll.js（飞书群轮询）,
+     persistent: true,
+     timeout_ms: 3600000
+   )
+   ```
+4. **回写 task_id**：Monitor 返回新 task_id → Edit `state.json.monitor_task_id`
+5. **验证**：下一个 30s 周期观察 stdout 是否有 `NEW_MSG` / `BOT_INFO` / `BOT_ERROR`；仍无输出则 `/cc-bot:stop` + 人工排查 lark-cli auth 或 profile 字段
+
+**不要做的事**：不要 `kill` 所有 node 进程（会跨项目误杀）；不要删 `.cc-bot/runtime/poll.emitted`（会导致历史消息被当新消息重推）。
