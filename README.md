@@ -26,6 +26,8 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/WaterTian/cc-bot/releases"><img src="https://img.shields.io/github/v/tag/WaterTian/cc-bot?style=flat-square&label=version&color=blueviolet&sort=semver" alt="version" /></a>
+  &nbsp;
   <a href="#install"><img src="https://img.shields.io/badge/install-4_commands-blueviolet?style=flat-square" alt="install" /></a>
   &nbsp;
   <img src="https://img.shields.io/badge/im-lark%20%C2%B7%20extensible-blue?style=flat-square" alt="im" />
