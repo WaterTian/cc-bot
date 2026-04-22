@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Claude Code plugin that turns any IM group into an AI project assistant (Lark/Feishu first, more IMs extensible)",
-    "version": "0.1.1"
+    "version": "0.1.2"
   },
   "plugins": [
     {

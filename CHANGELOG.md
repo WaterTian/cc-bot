@@ -4,6 +4,11 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.2] - 2026-04-22
+
+- feat: 加 scripts/release.js 一键发版脚本 + CHANGELOG.md
+- feat: 加 /cc-bot:doctor 健康检查命令 + README Updating 升级指南
+
 ## [0.1.1] - 2026-04-22
 
 ### Added
