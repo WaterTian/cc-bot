@@ -120,6 +120,9 @@ function acquireLock() {
   try {
     fs.writeFileSync(PID_FILE, String(process.pid), 'utf8')
   } catch {}
+  // 注意：main-busy.lock 故意不在此清理（与 poll.pid / poll.emitted 不同策略）。
+  // 原因：启动 bot 时 CC 主窗口可能正在对话（hook 已写 lock），清掉会让群消息
+  // 立刻 emit 打断主窗口任务；残留过期 lock 由 checkMainBusy() 10min 自动清。
 }
 
 function verifyLock() {

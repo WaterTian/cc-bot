@@ -157,7 +157,9 @@ Bot 进入休眠，群消息将不再响应
 | `.cc-bot/runtime/member-cache.json` | 成员缓存（open_id → `{name, role}`） |
 | `.cc-bot/runtime/hud-stdin.json` | HUD 数据（cc-hud 写入） |
 | `.cc-bot/runtime/agents.json` | 多 agent 调度 registry（running / queue；启动时空态，详见 §消息调度） |
-| `.cc-bot/runtime/events.log` | 诊断日志（polling 架构下常规不写；仅 poll.js 连续 3 轮 stdout 不可写退出前破例写 `BOT_ERROR` 留痕） |
+| `.cc-bot/runtime/main-busy.lock` | 主会话忙碌锁（CC UserPromptSubmit 写 / Stop 删；poll.js 读；10min 过期自动清，详见 §主会话优先级） |
+| `.cc-bot/runtime/main-busy-notified.flag` | 同锁周期内群占位消息只发一次的节流标记（unlock 时清） |
+| `.cc-bot/runtime/events.log` | 诊断日志（polling 架构下常规不写；破例写入场景：poll.js 连续 3 轮 stdout 不可写退出前 `BOT_ERROR`、`main-busy.lock` 过期 10min 自动清时 `BOT_WARN`） |
 
 ## 角色与权限
 
