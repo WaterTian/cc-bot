@@ -21,3 +21,7 @@ yarn-debug.log*
 # pre-commit 真名黑名单（本地化，不进库）
 scripts/blocklist.txt
 scripts/hooks/
+
+# 测试产物（含真名/真 ID，本地保留不进库）
+FEEDBACK-*.md
+REGRESSION-*.md

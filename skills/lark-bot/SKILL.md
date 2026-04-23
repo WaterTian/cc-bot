@@ -59,7 +59,7 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
 应对 2026-04-20 polling 架构三坑（见 memory `feedback_from_fantown_polling_architecture_traps`）：
 
 1. **PID lockfile 单例锁** — 启动写 `.cc-bot/runtime/poll.pid`，若已有活进程则 `exit 0`；每 tick `verifyLock()` 校验 pid 仍是自己，被抢则自杀
-2. **stdout.writable + EPIPE** — Monitor 管道断时 tick 前自检 `process.stdout.writable`，或 `stdout.on('error', EPIPE)` 立即 `exit 1`，防孤儿污染 `poll.emitted`
+2. **stdout EPIPE 容错自杀** — 单轮 `process.stdout.writable=false` 或 `stdout.on('error', EPIPE)` 时计数 `epipeStreak++` + skip 当轮 tick（**不立即退出**）；连续 3 轮（~90s）都不可写才 `exit 1`，退出前 `events.log` 写 `BOT_ERROR|poll.js|stdout-*-streak-3|...` 留诊断。瞬断不死、真断才死，避免 Monitor 管道抖动导致 bot 静默死亡
 3. **state 未来值防御** — `last_processed_time > Date.now()+60s` 自愈降到 `now-60s`，emit `BOT_ERROR|poll.js|state-future-timestamp|...`
 
 ### 启动流程（为低延迟设计：单批次并行 + 跳过冗余检查）
@@ -156,7 +156,8 @@ Bot 进入休眠，群消息将不再响应
 | `.cc-bot/runtime/poll.emitted` | 已推送 message_id 去重表（最近 200 条） |
 | `.cc-bot/runtime/member-cache.json` | 成员缓存（open_id → `{name, role}`） |
 | `.cc-bot/runtime/hud-stdin.json` | HUD 数据（cc-hud 写入） |
-| `.cc-bot/runtime/events.log` | 历史审计日志（polling 架构下不再写入，仅保留过渡期记录） |
+| `.cc-bot/runtime/agents.json` | 多 agent 调度 registry（running / queue；启动时空态，详见 §消息调度） |
+| `.cc-bot/runtime/events.log` | 诊断日志（polling 架构下常规不写；仅 poll.js 连续 3 轮 stdout 不可写退出前破例写 `BOT_ERROR` 留痕） |
 
 ## 角色与权限
 
@@ -292,19 +293,32 @@ profile 未定义的意图 → 回"当前项目未配置该操作，请检查 pr
 
 ### 最高优先级规则 1：处理完立即推进 state.json
 
-**"处理完一条消息"定义：** 已向群发了最终回复（`lark-cli +messages-reply` 成功）。
+**"处理完一条消息"定义**（按分派路径分别计）：
+- **inline 路径**：已向群发了最终回复（`lark-cli +messages-reply` 成功）
+- **subagent 路径**：Agent 已派出（`run_in_background=true`）+ 占位回复已发
+- **入队路径**：已回"前面 N 个任务在跑"+ 任务写入 `agents.json.queue`
 
-**发完回复，下一个工具调用必须是 `Edit state.json` 写入 `last_processed_time = {该条 time}`。** 优先级高于：下一条消息处理、部署/编译、任何"顺手再做一步"。
+**处理完的下一个工具调用必须是 `Edit state.json` 写入 `last_processed_time = {该条 time}`。** 优先级高于：下一条消息处理、部署/编译、任何"顺手再做一步"。subagent 最终结果由 subagent 自己发群、主会话收到完成通知时再处理 registry pop，**不影响 state 推进**。
 
-**反例：** Claude 回完消息紧接着跑 compile 或处理下一条 NEW_MSG，中途被 compaction/崩溃/中断。重启后 catch-up 以 `last_processed_time` 为准，把"已回复但 state 未推进"的消息当未处理重新补发，造成重复回复、用户困惑。
+**反例：** 主会话派出 subagent 后没推进 state，中途被 compaction/崩溃/中断。重启后 catch-up 以 `last_processed_time` 为准，把"已派但 state 未推进"的消息重新派一次，同一任务跑两遍。
 
-**正确节奏：** 回复 → Edit state.json → 再做别的事。每条消息独立推进，绝不批量延迟。
+**正确节奏：** 分派完成（按上面三路径任一） → Edit state.json → 再做别的事。每条消息独立推进，绝不批量延迟。
+
+**`last_processed_time` 格式：毫秒时间戳（Number 或字符串形式的数字）**，和 `NEW_MSG|...|<createTimeMs>` 末段一致。若消息时间来自 `lark-cli im +chat-messages-list` 返回的字符串（如 `"2026-04-22 17:38"`），必须先转毫秒再写入：
+
+```bash
+node -e 'console.log(new Date("2026-04-22 17:38:00 +0800").getTime())'
+```
+
+**禁止**混写字符串和毫秒 —— fetch 比对会假阳/假阴，直接导致漏消息或重复回复。
 
 ### 最高优先级规则 2：处理前先 fetch 5 条核对（fetch_before_reply）
 
 收到 NEW_MSG 任务通知时，**处理该条前先 `lark-cli im +chat-messages-list --as bot --chat-id <chat_id> --page-size 5 --sort desc`**，对比 `state.json.last_processed_time`，把所有未处理消息按 `create_time` 升序逐条回复 + 推进 state。
 
 **Why：** Monitor 30s 轮询 + poll.emitted 去重，密集多条时可能只推最新一条；system-reminder 也只带一条最新 NEW_MSG。单条 push 处理会漏中间关键消息，严重破坏信任（2026-04-20 实战经验，依据 memory `feedback_fetch_before_reply`）。
+
+**一次 fetch 覆盖多条（密集场景优化）**：一个 Monitor push 含多条 NEW_MSG 时（或短时间内主会话被连续唤醒），**只 fetch 一次 5-10 条**即可覆盖全部未处理消息，不必每条 NEW_MSG 都重新 fetch 一轮。判定依据：若前一次 fetch 时间距本次 ≤ 10s 且已覆盖当前 msg_id 范围，可复用结果。
 
 **特别触发 fetch 10 条：**
 - 用户情绪激动（连发"？？？"、质疑"你收到了吗"）
@@ -323,12 +337,14 @@ profile 未定义的意图 → 回"当前项目未配置该操作，请检查 pr
    - 其他 → 取消
    - admin 永久授权直接跳过 `pending_confirm`
 4. **图片预处理**（content 含 `[Image: img_xxx]`）：逐个下载 + Read
-5. **意图识别 + 执行**：通用意图按 §意图路由，项目特定查 profile.intents
+5. **意图识别**：通用意图按 §意图路由，项目特定查 profile.intents
+6. **分派决策**（见 §消息调度）：inline 自己回 / 派 subagent `run_in_background=true` / 入队。inline 继续走 step 7；subagent 和入队走 §消息调度 §派单动作 §入队动作，本流程到此结束（state 推进在那边单独处理）
+7. **inline 执行**：
    - admin 触发危险操作 → 直接执行，不写 `pending_confirm`
    - member 触发"仅管理员"操作 → 拒绝
    - 其他危险操作的非 admin → 写 `pending_confirm`（15 min 超时）
    - `lark-cli im +messages-reply --as bot --message-id <msg_id>` 回复（用 `{name}` 称呼）
-6. **推进 state.json**：Edit `last_processed_time = time`
+8. **推进 state.json**：Edit `last_processed_time = time`（`time` = NEW_MSG 末段的 `createTimeMs` 毫秒戳，见 §最高优先级规则 1 格式规范）
 
 ### Bug 报告处理节奏（多 bug 密集会话）
 
@@ -382,9 +398,154 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 30s 主
 
 **Monitor push 与 API 兜底结果冲突时以 API 为准。**
 
+## 消息调度（多 agent 并发）
+
+主会话 = 调度器本身，**不自己跑重活**。收到 NEW_MSG 后判断：能派 subagent 就 `Agent(run_in_background=true)` 后台派出去，主会话立即解放处理下一条；不能派就排队。目标是多条群消息并行处理，主会话永远不被单条卡住。
+
+### 核心概念
+
+- **slot**：同时允许跑的逻辑任务数，默认 `slots_max = 3`。一条用户消息 = 1 slot，不论内部 fan-out 几个 subagent
+- **registry**：`.cc-bot/runtime/agents.json`，记录 running / queue
+- **tag**：任务登记的资源标签，冲突判定的钥匙
+- **fan-out**：单条用户消息内部拆多个并行 subagent，上限 3，不占额外 slot
+
+### agents.json 格式
+
+```json
+{
+  "slots_max": 3,
+  "running": [
+    {
+      "id": "agent_<msg_id>",
+      "msg_id": "om_xxx",
+      "user_name": "A",
+      "user_open_id": "ou_xxx",
+      "intent": "fix_login_bug",
+      "tags": ["write:src/auth", "net:push"],
+      "started_at": "2026-04-22T10:00:00Z",
+      "subagent_count": 1
+    }
+  ],
+  "queue": [
+    {
+      "msg_id": "om_yyy",
+      "user_name": "B",
+      "user_open_id": "ou_yyy",
+      "intent": "refactor_auth",
+      "tags": ["write:src/auth"],
+      "queued_at": "2026-04-22T10:01:00Z",
+      "reason": "conflict:write:src/auth"
+    }
+  ]
+}
+```
+
+文件不存在视为空态 `{"slots_max": 3, "running": [], "queue": []}`，主会话首次读到 miss 时自己 Write 空态。重启 bot 时 registry 全清（和 `poll.emitted` 同策略，因为 subagent 会随主会话 stop 失去监听）。
+
+**字段格式规范**：
+- `started_at` / `queued_at`：**ISO 8601 字符串**（如 `"2026-04-22T10:00:00Z"`），用于人类可读 debug 和超时判定（主会话用 `new Date(x).getTime()` 换算）
+- `state.json.last_processed_time`：**毫秒时间戳**（见 §最高优先级规则 1）——两者格式故意不同，不要混用
+
+### 分派决策表
+
+| 消息类型 | 处理 | 占 slot |
+|---|---|---|
+| 控制类（群里发"开/关 bot"）| 拒绝（§开关指令的来源限制）| 否 |
+| 查询 / 闲聊 / 简单回复 / 状态 | 主会话 inline 直接回 | 否 |
+| 改动 / 长工具链（fix bug / 部署 / 发码 / 大搜索）| 派 subagent `run_in_background=true` | 是 |
+
+判定 inline 还是 subagent 的粗标准：**会不会改代码 / 跑部署 / 读大量文件 / 预估 >2min 工具链**。命中任一走 subagent。
+
+### 派单前必做（顺序）
+
+1. **Fetch 核对**（§最高优先级规则 2 不变）
+2. **意图 + 分派决策**：inline 还是 subagent
+3. **生成 tags**（subagent 才需要）：
+   - `read:<path-prefix>`：只读分析 / 格式检查 / 代码审计（如"检查 README 格式"）
+   - `write:<path-prefix>`：写代码的路径前缀（目录层级，`write:src/auth`）
+   - `mcp:<name>`：独占型 MCP（`mcp:wechat-devtools` / `mcp:chrome-devtools`）
+   - `port:<n>`：dev server / preview 端口
+   - `net:push`：发码 / 部署 / 推送这类不可并发
+   - `exclusive:git`：rebase / push / tag 这类 git 独占
+   tag 集合不求穷尽，抓"这件事最怕被谁同时动"就够
+
+   **冲突规则**（仅用于 `read:` / `write:` 两个前缀；其他前缀一律同值即冲突）：
+   - `read:X` vs `read:X` → **不冲突**（并发读无副作用）
+   - `read:X` vs `write:X` → **冲突**（避免读到写一半的文件）
+   - `write:X` vs `write:X` → **冲突**（避免覆盖）
+   - 前缀匹配按"一方是另一方的前缀即算同值"（例 `write:src/auth` 与 `write:src/auth/login` 冲突；`write:src/auth` 与 `write:src/api` 不冲突）
+4. **查 registry**（按顺序判，命中就入队不再看后面）：
+   - `running.length >= slots_max` → 入队（reason: `slot_full`）
+   - 新任务 tags 与任一 `running[i].tags` **非空交集** → 入队（reason: `conflict:<tag>`）
+   - 同 `user_open_id` 已在 running 或 queue → 入队（reason: `user_serial`）
+   - 否则 → 派单
+
+### 派单动作（单任务）
+
+1. Edit `agents.json`，把任务写进 `running[]`
+2. 回群占位消息：「好，开始 X」（≤15 字，§ACK 响应节奏不变）
+3. 推进 `state.json.last_processed_time = msg.create_time`（**不等 subagent 完成**，派出去就算处理完）
+4. 调 `Agent`，参数：
+   - `run_in_background: true` **必填**
+   - `subagent_type` 按任务选（改代码 = general-purpose，跨目录搜索 = Explore）
+   - prompt 必备段（任选合成）：
+     - 任务描述
+     - `profile.project.root` 绝对路径（工作区）
+     - "完成后回报 ≤ 200 字"
+     - **"结果发群模板**（原样粘贴使用，`<>` 替换实际值）：
+       ```bash
+       LARK_CLI_NO_PROXY=1 lark-cli im +messages-reply --as bot \
+         --message-id <msg_id> \
+         --msg-type text \
+         --content '{"text":"<结论正文，换行用 \\n 转义>"}'
+       ```
+       其中 `msg_id` 是触发本任务的用户消息 id（主会话派单时从 NEW_MSG 传入 prompt）。**禁止用 `--text` 参数 + 反引号/`$'...'`**，Windows Git Bash 下 `\n` 会被当字面量（依据 `feedback_shell_safety_winbash`）
+5. 主会话本次响应结束，继续接下条 NEW_MSG
+
+### Fan-out（单消息多 subagent 并行）
+
+一条用户消息提多件事（"review PR + 跑测试 + 查历史 bug"）可以拆。**前提**：
+
+- 子任务无依赖（不是"先 A 再 B"顺序链）
+- 子任务 tags 两两无交集
+- 数量 ≤ 3
+
+**派法**：同一个响应里多个 `Agent` tool_use（都 `run_in_background=true`）。registry 按一个任务记录，`subagent_count = N`，`tags` 取所有子任务 tags 并集（影响后续冲突判定）。
+
+### 入队动作
+
+1. Edit `agents.json.queue` 追加任务，带 reason
+2. 回群：「收到。前面 N 个任务在跑，排到后开始。」（N = `running.length + queue 中该任务之前的条数`）
+3. 推进 state.json
+
+### 完成通知 + 队列 pop
+
+subagent 完成时主会话收到自动通知（`run_in_background` 机制）。处理：
+
+1. Edit `agents.json`，running[] 移除对应任务
+2. fan-out 任务（`subagent_count > 1`）：等**所有**子 agent 都完成再移除
+3. 扫 queue[] 从头找**第一个能跑的**（slot 有空 + tags 不与剩余 running 冲突 + 不违反同用户串行）→ 按派单动作走
+4. 队列里后面的任务可越过前面的跑（非严格 FIFO），只要不违反同用户串行
+
+### 队列上限 / 超时
+
+- queue.length 上限 10；满了直接回群「任务队列已满（10 条），稍后再试」，不入队
+- 单 subagent 任务预计 > 30min（如大型部署）先警告用户，确认再派；卡住无响应靠 §Monitor 异常重启 兜底
+
+### 与 §Agent 优先策略 的关系
+
+两个不同维度，不混：
+
+- §Agent 优先策略（§运行时节奏内）：**主会话内部省 token**派 Agent（跨目录 Grep 派 Explore），**不占 slot**、不登记 registry、生命周期在一次响应内
+- §消息调度（本节）：**群消息任务级**派单，**占 slot**、登记 registry、跨响应存在（`run_in_background`）
+
+同一次响应里两者可并存：inline 处理时内部可以再派 Agent 读文件。
+
 ## 运行时节奏（长会话反崩溃）
 
 ### Agent 优先策略（默认思路）
+
+> 本节 = **主会话内部为省 token 派 Agent**（不占 slot、不登记 registry、生命周期在一次响应内）。群消息任务级派单见 §消息调度。
 
 Bot 长跑时，主上下文每省一点，长期累积明显。**即便还在 < 70% 正常档，以下场景也默认走 Agent**，让主会话只收回 summary：
 

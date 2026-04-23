@@ -17,7 +17,8 @@
 //
 // 三层防御（2026-04-20 polling 架构三坑对策，不可删除）：
 //   ① PID lockfile 单例锁 — 启动旧进程活则 exit 0；每 tick 校验 pid 文件仍是自己
-//   ② stdout.writable + EPIPE — Monitor 管道断则自杀，防孤儿污染 poll.emitted
+//   ② stdout EPIPE 容错自杀 — 单轮不可写 skip 当轮，连续 3 轮（~90s）才 exit 防污染 poll.emitted；
+//      退出前写 events.log 留诊断痕迹（瞬断不死，真断才死）
 //   ③ state.last_processed_time 未来值防御 — 超 now+60s 自愈 + emit BOT_ERROR
 
 const fs = require('fs')
@@ -132,19 +133,41 @@ function releaseLock() {
   } catch {}
 }
 
-// ========== Defense 2: stdout.writable + EPIPE ==========
+// ========== Defense 2: stdout EPIPE 容错（瞬断 skip，真断 exit） ==========
 
-function assertStdoutAlive() {
+const EPIPE_TOLERATE = 3  // 连续 N 轮 stdout 不可写才 exit（~N × polling_interval）
+const EVENTS_LOG = path.join(RUNTIME_DIR, 'events.log')
+let epipeStreak = 0
+
+function logEvent(line) {
+  // 破例允许 events.log 写入，用于 stdout 真断后的诊断痕迹（polling 架构常规不写）
+  try {
+    fs.appendFileSync(EVENTS_LOG, `${new Date().toISOString()} ${line}\n`)
+  } catch {}
+}
+
+function checkStdoutTolerance() {
   if (!process.stdout.writable) {
-    releaseLock()
-    process.exit(1)
+    epipeStreak++
+    if (epipeStreak >= EPIPE_TOLERATE) {
+      logEvent(`BOT_ERROR|poll.js|stdout-closed-streak-${epipeStreak}|连续 ${epipeStreak} 轮 stdout 不可写，退出防污染 poll.emitted`)
+      releaseLock()
+      process.exit(1)
+    }
+    return false
   }
+  epipeStreak = 0
+  return true
 }
 
 process.stdout.on('error', (err) => {
   if (err && err.code === 'EPIPE') {
-    releaseLock()
-    process.exit(1)
+    epipeStreak++
+    if (epipeStreak >= EPIPE_TOLERATE) {
+      logEvent(`BOT_ERROR|poll.js|stdout-epipe-streak-${epipeStreak}|连续 EPIPE，退出防污染 poll.emitted`)
+      releaseLock()
+      process.exit(1)
+    }
   }
 })
 
@@ -207,7 +230,7 @@ async function pollMessages() {
 }
 
 async function tick() {
-  assertStdoutAlive()
+  if (!checkStdoutTolerance()) return
   verifyLock()
 
   let state = readState()
