@@ -68,6 +68,17 @@ Execute checks in parallel where possible. Collect results, then print one unifi
   - 不存在 → ⚠ statusline tick 尚未触发过，随便跑一次 tool 后再查
   - 存在但 JSON 解析失败 → ⚠ 文件损坏
 
+### 5b. Main-busy hook (`~/.claude/settings.json`, v0.1.6+)
+
+同一份 `~/.claude/settings.json`，查 `hooks.UserPromptSubmit` / `hooks.Stop` 两个事件：
+- 任一事件下 `.hooks[].command` 含 `main-busy.js lock`（UserPromptSubmit）或 `main-busy.js unlock`（Stop）→ ✓
+- 两个事件都缺 → ⚠ 未注册（主窗口对话期间群消息不会让路）→ 建议重跑 `/cc-bot:setup`（step 9 会幂等注册）
+- 只有一个 → ⚠ 半注册，另一侧缺失会导致锁永不解或永不上
+- 额外查 `.cc-bot/runtime/main-busy.lock` 存活状态：
+  - 不存在 → ℹ 主窗口空闲
+  - 存在且 ts 距今 < 10min → ℹ 主窗口忙碌中
+  - 存在且 ts 距今 > 10min → ⚠ 锁过期未清理（poll.js 下轮应自动清 + 写 events.log 告警，若仍在 → 检查 poll.js 是否在跑）
+
 ### 6. lark-cli
 
 - `lark-cli --version` 成功？✗ if not found → `npm i -g @larksuite/cli`

@@ -143,7 +143,9 @@ Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --pro
 
 You won't be prompted for Monitor on any future version upgrade.
 
-**For v0.1.2 or earlier installs** (pre-auto): after you update to v0.1.3+, re-run `/cc-bot:setup` — step 9 is idempotent and will append the rule. Or add it manually.
+**For v0.1.2 or earlier installs** (pre-auto): after you update to v0.1.3+, re-run `/cc-bot:setup` — step 10 is idempotent and will append the rule. Or add it manually.
+
+**Since v0.1.6** — `/cc-bot:setup` step 9 additionally registers a `UserPromptSubmit` / `Stop` hook pair into `~/.claude/settings.json` so main-window typing automatically pauses group-message handling (poll.js skips emit + sends one-shot "主窗口处理中，稍后" placeholder). **After upgrading to v0.1.6 you must re-run `/cc-bot:setup` once** to activate the hook — the three §Updating commands above only pull new code; they don't touch user-global settings.json.
 
 <br/>
 

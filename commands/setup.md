@@ -276,7 +276,45 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
 
    e. Tell user: `✓ statusline shim 已注册到 ~/.claude/settings.json（下次 CC 重启生效；或立即重新打开会话）`
 
-9. **注册 Monitor 通配权限**到 `<project>/.claude/settings.local.json`，让 cc-bot 版本升级后不再被 CC 反复询问权限。
+9. **注册 main-busy hook**（v0.1.6+）—— 让 `~/.claude/settings.json` 的 `hooks.UserPromptSubmit` / `hooks.Stop` 调用 cc-bot 的 main-busy 脚本，实现"主窗口对话优先、群消息让路"。
+
+   **为什么走用户全局 settings.json 而非 plugin `hooks.json`**：CC 已知 bug #10225 — plugin 声明的 UserPromptSubmit hook 完全不 fire。`main-busy.js` 自带"非 cc-bot 项目 silent skip"（检查 `.cc-bot/` 是否存在），全局注册对其他项目无副作用。
+   
+   a. Read `~/.claude/settings.json`（沿用 step 8 同一个文件）。缺失则以 `{}` 为初值。确保 `hooks` 是对象（`typeof hooks === 'object' && !Array.isArray(hooks)`），不是则跳过本步报警「settings.json 的 hooks 字段类型异常」（不强写覆盖）。
+   
+   b. 目标 hook 配置（两条都要有）：
+      ```json
+      {
+        "hooks": {
+          "UserPromptSubmit": [
+            {
+              "hooks": [
+                { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js lock" }
+              ]
+            }
+          ],
+          "Stop": [
+            {
+              "hooks": [
+                { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js unlock" }
+              ]
+            }
+          ]
+        }
+      }
+      ```
+   
+   c. 幂等合并：对于 `UserPromptSubmit` 和 `Stop` 两个事件各自做：
+      - 若 `hooks[event]` 不存在 / 空数组 → 整段写入
+      - 若已存在条目：扫描所有 `.hooks[].command`，若**已有任一**命令含 `main-busy.js lock`（或 unlock）→ ✓ 幂等跳过
+      - 若存在非 cc-bot 的其他 hook 条目 → append 新 matcher（不删用户已有的）
+   
+   d. Tell user：
+      - 首次注册 → `✓ 已注册 main-busy hook 到 ~/.claude/settings.json（主窗口对话期间群消息自动让路）`
+      - 幂等跳过 → `✓ main-busy hook 已就位（跳过）`
+      - 新增但保留了其他 hook → `✓ 已追加 main-busy hook（保留你现有的其他 {event} hook）`
+
+10. **注册 Monitor 通配权限**到 `<project>/.claude/settings.local.json`，让 cc-bot 版本升级后不再被 CC 反复询问权限。
 
    a. Read `<project>/.claude/settings.local.json`。文件缺失 → 初值 `{}`；解析失败 → 直接报错「settings.local.json 格式错误，请先修复」并跳过本步（不能强写覆盖用户数据）。
 
@@ -296,13 +334,13 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
       - 幂等跳过 → `✓ Monitor 通配权限已就位（跳过）`
       - 发现硬编码僵尸 → `⚠ 检测到 N 条硬编码版本路径的旧权限规则（位置 .claude/settings.local.json）。建议手工替换为通配：\nBash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)`
 
-10. **检测 cc-hud 安装状态**（决定完成提示里附加哪段 hint）：
+11. **检测 cc-hud 安装状态**（决定完成提示里附加哪段 hint）：
    ```bash
    grep -q '"cc-hud@' ~/.claude/plugins/installed_plugins.json 2>/dev/null && echo installed || echo not_installed
    ```
    设 **HUD_STATE** = `installed` 或 `not_installed`。
 
-11. Tell user（根据 HUD_STATE 拼出对应 hint）：
+12. Tell user（根据 HUD_STATE 拼出对应 hint）：
 
    共通部分：
    ```
@@ -338,7 +376,8 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
 - **Stage B** `auth list` 非空 → 取出 BOT_APP_ID / ADMIN_OPEN_ID / ADMIN_NAME 直接到 Stage D
 - **Stage E** `active.json` 存在且字段非占位符（`im.bot_app_id` 匹配 `/^cli_[a-z0-9]+$/` 且**不是** `cli_xxxxxxxxxxxx` 示例；`im.chat_id` 以 `oc_` 开头且长度 > 20）→ 输出「已配置，可 /cc-bot:start」。**仍需复查**：
   - 若 `settings.json` 的 `statusLine.command` 未指向 cc-bot shim → 跑步骤 8 补注册（幂等，可重复）
+  - 若 `settings.json` 的 `hooks.UserPromptSubmit` / `hooks.Stop` 无 cc-bot main-busy 命令 → 跑步骤 9 补注册（幂等）
   - 若 `.cc-bot/runtime/member-cache.json` 缺失 → 跑步骤 6 补写入
-  - 若 `.claude/settings.local.json` 无 Monitor 通配权限规则 → 跑步骤 9 补注册（幂等）
+  - 若 `.claude/settings.local.json` 无 Monitor 通配权限规则 → 跑步骤 10 补注册（幂等）
 
 用户任何阶段失败后修好，再发 `/cc-bot:setup` 会自动从断点续跑。

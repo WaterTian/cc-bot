@@ -14,7 +14,9 @@ cc-bot/
 │   ├── base.js                  # IMAdapter 基类（接口定义）
 │   └── lark.js                  # 飞书实现（包 lark-cli）
 ├── runtime/
-│   └── poll.js                  # 消息轮询主进程（Monitor 托管）— 必须接 --project <abs>
+│   ├── poll.js                  # 消息轮询主进程（Monitor 托管）— 必须接 --project <abs>
+│   ├── statusline.js            # CC statusLine shim — 把 HUD stdin 落盘到 .cc-bot/runtime/hud-stdin.json
+│   └── main-busy.js             # CC UserPromptSubmit/Stop hook — 写/删 .cc-bot/runtime/main-busy.lock（v0.1.6+）
 ├── skills/
 │   └── lark-bot/
 │       └── SKILL.md             # 飞书版 bot 行为规范

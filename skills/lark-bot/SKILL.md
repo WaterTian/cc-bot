@@ -541,6 +541,30 @@ subagent 完成时主会话收到自动通知（`run_in_background` 机制）。
 
 同一次响应里两者可并存：inline 处理时内部可以再派 Agent 读文件。
 
+### 主会话优先级（v0.1.6+）
+
+**目标**：CC 主窗口的对话任务不被群消息打断。90% 场景是群里单用户对话，slot 级并发实际走不满，但"主窗口正在改代码，群里发消息立刻插队打断"是真实痛点。
+
+**机制**（poll.js 层拦截，主会话无感知）：
+
+1. CC hook 注册在 `~/.claude/settings.json`（由 `/cc-bot:setup` step 9 幂等注入）：
+   - `UserPromptSubmit` → `node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js lock` 写 `.cc-bot/runtime/main-busy.lock`
+   - `Stop` → `node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js unlock` 删锁 + 删通知标志
+2. poll.js 每 tick 开头 `checkMainBusy()`：
+   - 锁存在 + 未过期 → **仍 fetch 但不 emit**（消息不进主会话事件队列）；首次见到新消息发群占位「主窗口处理中，稍后」+ 写 `main-busy-notified.flag` 同锁周期内静默
+   - 锁存在 + 过期（> 10min）→ 强制删锁 + 写 `events.log` 告警 `BOT_WARN|main-busy-lock-expired|ttl-600000ms`
+   - 锁不存在 → 正常 emit NEW_MSG
+3. 主会话响应完（Stop）→ 锁 + flag 同时删 → 下一 tick（≤ 30s）恢复正常 fetch，积压消息通过 `poll.emitted` 去重机制补 emit，不会丢
+
+**为何 hook 走 `~/.claude/settings.json` 而不是 plugin `hooks.json`**：CC bug #10225 — plugin 声明的 `UserPromptSubmit` hook 完全不 fire。`main-busy.js` 自带"非 cc-bot 项目 silent skip"（检查 `.cc-bot/` 存在），全局注册对其他项目无副作用。
+
+**主会话做什么**：什么都不用做。本机制完全由 poll.js + hook 脚本自主运转，不改 agents.json、不改 §消息调度 主流程。主会话只需知道：群消息静默不是丢了，是主窗口占用期间被主动延迟，Stop 后会补 emit。
+
+**关键不变式**：
+- 锁期间 poll.js **不 append poll.emitted**，否则解锁后消息会被去重跳过
+- 占位 flag 仅在锁周期内有效，`unlock` 调用时一并删
+- `state.last_processed_time` 只由主会话推进；poll.js 不动它
+
 ## 运行时节奏（长会话反崩溃）
 
 ### Agent 优先策略（默认思路）

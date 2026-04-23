@@ -88,6 +88,11 @@ const VALID_TYPES = new Set(['text', 'post', 'file', 'image'])
 const FAIL_ALERT_THRESHOLD = 4
 const FUTURE_TIME_TOLERANCE_MS = 60 * 1000
 
+// 主会话忙碌锁（CC UserPromptSubmit/Stop hook 写入）
+const MAIN_BUSY_LOCK = path.join(RUNTIME_DIR, 'main-busy.lock')
+const MAIN_BUSY_NOTIFIED_FLAG = path.join(RUNTIME_DIR, 'main-busy-notified.flag')
+const MAIN_BUSY_TTL_MS = 10 * 60 * 1000  // 10min 硬编码过期兜底
+
 let consecutiveFailures = 0
 let alertedOnce = false
 
@@ -229,6 +234,37 @@ async function pollMessages() {
   }
 }
 
+// ========== 主会话优先级：锁检测 + 占位 ==========
+
+function checkMainBusy() {
+  try {
+    const raw = fs.readFileSync(MAIN_BUSY_LOCK, 'utf8')
+    const data = JSON.parse(raw)
+    const ts = Number(data.ts || 0)
+    if (Date.now() - ts > MAIN_BUSY_TTL_MS) {
+      logEvent(`BOT_WARN|poll.js|main-busy-lock-expired|ttl-${MAIN_BUSY_TTL_MS}ms|session=${data.session || 'unknown'}`)
+      try { fs.unlinkSync(MAIN_BUSY_LOCK) } catch {}
+      try { fs.unlinkSync(MAIN_BUSY_NOTIFIED_FLAG) } catch {}
+      return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function sendMainBusyPlaceholder() {
+  try {
+    if (fs.existsSync(MAIN_BUSY_NOTIFIED_FLAG)) return
+  } catch { return }
+  try {
+    await adapter.sendText({ chatId: CHAT_ID, text: '主窗口处理中，稍后' })
+    fs.writeFileSync(MAIN_BUSY_NOTIFIED_FLAG, String(Date.now()))
+  } catch {
+    // 占位发送失败静默 — 主业务不受影响
+  }
+}
+
 async function tick() {
   if (!checkStdoutTolerance()) return
   verifyLock()
@@ -237,6 +273,8 @@ async function tick() {
   state = guardFutureTime(state)
 
   if (state.paused) return
+
+  const mainBusy = checkMainBusy()
 
   const msgs = await pollMessages()
   if (msgs === null) {
@@ -253,6 +291,7 @@ async function tick() {
   // adapter 返回降序，翻成升序处理
   const asc = [...msgs].reverse()
   const newlyEmitted = []
+  let busySeenNew = false
 
   for (const m of asc) {
     if (!m.id) continue
@@ -261,10 +300,16 @@ async function tick() {
     if (!VALID_TYPES.has(m.type)) continue
     if (!m.createTimeMs || m.createTimeMs <= lastTime) continue
 
+    if (mainBusy) {
+      // 主窗口忙：不 emit、不记 emitted，等解锁后下一 tick 正常处理
+      busySeenNew = true
+      continue
+    }
     console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}`)
     newlyEmitted.push(m.id)
   }
 
+  if (mainBusy && busySeenNew) await sendMainBusyPlaceholder()
   if (newlyEmitted.length > 0) appendEmitted(newlyEmitted)
 }
 
