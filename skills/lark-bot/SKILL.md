@@ -545,6 +545,17 @@ subagent 完成时主会话收到自动通知（`run_in_background` 机制）。
 
 **目标**：CC 主窗口的对话任务不被群消息打断。90% 场景是群里单用户对话，slot 级并发实际走不满，但"主窗口正在改代码，群里发消息立刻插队打断"是真实痛点。
 
+**"主窗口对话"的精确定义**：
+- 概念上指**开发人员在 CC 主窗口主动键入**的 prompt（人类对话）
+- 实现上**以 CC `UserPromptSubmit` hook fire 为准** —— CC 当前不提供"prompt 来源"字段区分人工/自动，见 memory `feedback_cc_plugin_userpromptsubmit_hook_bug`
+- 以下场景 hook 也会 fire、同样触发 lock（现行 CC 限制下无法区分，一视同仁）：
+  - `/loop` / `ScheduleWakeup` / `CronCreate` / `RemoteTrigger` 等自动触发
+  - Task/subagent 完成时（CC bug #16952 的假 fire）
+  - `claude -p "..."` 一次性 CLI prompt
+- Monitor 事件注入（群消息 push 路径）**不走** `UserPromptSubmit`，不会自锁
+
+**这不是 bug，是设计**：主会话是单线程，上述"自动任务"场景下主会话本就被占用，群消息 emit 过去也没法响应。锁只是把"主会话忙没理你"变成群里显式占位「主窗口处理中，稍后」，体验更好不更差。
+
 **机制**（poll.js 层拦截，主会话无感知）：
 
 1. CC hook 注册在 `~/.claude/settings.json`（由 `/cc-bot:setup` step 9 幂等注入）：

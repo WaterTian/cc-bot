@@ -4,8 +4,15 @@
 // lock   时机：主窗口用户真输入（UserPromptSubmit）
 // unlock 时机：主会话响应完成（Stop）
 //
-// Monitor 事件注入不走 UserPromptSubmit，所以 hook 天然只在"主窗口真输入"
-// 期间上锁，不会被群消息处理误触发。
+// Monitor 事件注入不走 UserPromptSubmit（经 TaskOutput 插入当前响应），不会误 lock。
+// 但以下场景 CC 也会 fire UserPromptSubmit，main-busy.js 无法区分，一视同仁上锁：
+//   - /loop、ScheduleWakeup、CronCreate、RemoteTrigger 等自动触发的 prompt
+//   - Task/subagent 完成时（CC bug #16952 的假 fire）
+//   - `claude -p "..."` 一次性 CLI prompt
+// 这不是 bug — 主会话是单线程，上述场景主会话本就被占用无法响应群消息。
+// 锁只是让群里看到显式占位「主窗口处理中，稍后」而不是死寂，体验更好。
+// #16952 的残留风险：subagent 完成瞬间假 fire UserPromptSubmit 会再 lock 一次，
+// 但无配对 Stop → 靠 poll.js 的 10min 锁过期 + events.log 告警兜底。
 //
 // 用法：
 //   node runtime/main-busy.js lock

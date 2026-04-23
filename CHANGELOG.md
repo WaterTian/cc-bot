@@ -7,6 +7,7 @@ Release history is authoritative at the git tag level — see [GitHub releases](
 ## [0.1.6] - 2026-04-23
 
 - feat: 主会话优先级 — 主窗口对话期间群消息让路
+- docs: 明确"主窗口对话"定义（人类键入为主；自动触发 / subagent 完成也 lock，基于 CC 限制与单线程主会话的合理权衡）
 
 ## [0.1.5] - 2026-04-23
 
