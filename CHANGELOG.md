@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.5] - 2026-04-23
+
+- feat: 多 agent 调度架构 + poll.js EPIPE 容错
+
 ## [0.1.4] - 2026-04-22
 
 - docs: README 加 version badge（shields.io GitHub tag）
