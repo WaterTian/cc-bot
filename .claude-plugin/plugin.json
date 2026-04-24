@@ -1,7 +1,7 @@
 {
   "name": "cc-bot",
   "description": "Claude Code 驱动的 IM 群 AI 项目助手 — 飞书（Lark）起步，IM 可扩展",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "author": {
     "name": "Water"
   },

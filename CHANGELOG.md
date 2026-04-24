@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.7] - 2026-04-24
+
+- docs: SKILL 精简 17 行 + 清除 8 处外发死链 memory 引用
+
 ## [0.1.6] - 2026-04-23
 
 - feat: 主会话优先级 — 主窗口对话期间群消息让路
