@@ -22,7 +22,7 @@
 <p align="center">
   <code>IM group</code> &nbsp;&rarr;&nbsp; <code>Monitor</code> &nbsp;&rarr;&nbsp; <code>Intent</code> &nbsp;&rarr;&nbsp; <code>Claude acts</code> &nbsp;&rarr;&nbsp; <code>Chat reply</code>
   <br/>
-  <sub>natural-language command → per-project action → report back to group.</sub>
+  <sub>one plugin, any project, zero backend.</sub>
 </p>
 
 <p align="center">
@@ -73,17 +73,22 @@ CC-BOT 是一个 **Claude Code 插件**，监听 IM 群消息，把自然语言�
 </td></tr>
 </table>
 
+> [!TIP]
+> **Windows users:** Use `npm i -g @anthropic-ai/claude-code` instead of the native installer to avoid Bun memory crashes ([oven-sh/bun#25082](https://github.com/oven-sh/bun/issues/25082)). cc-bot's Monitor runs long-lived, amplifying Bun's memory pressure.
+>
+> **Windows 用户：** 建议用 `npm i -g @anthropic-ai/claude-code` 代替原生安装器，规避 Bun 内存崩溃；cc-bot 的 Monitor 是长驻进程，会放大 Bun 的内存问题。
+
 <br/>
 
 ## Features
 
 <table>
 <tr>
-  <td align="center" width="20%"><h3>⚙</h3><b>Interactive Setup</b><br/><sub>5-stage wizard<br/>auto-detect IDs</sub></td>
-  <td align="center" width="20%"><h3>🔌</h3><b>IM-agnostic</b><br/><sub>Lark today<br/>adapter pattern</sub></td>
-  <td align="center" width="20%"><h3>📣</h3><b>Per-project Intents</b><br/><sub>JSON-defined<br/>Claude executes</sub></td>
-  <td align="center" width="20%"><h3>🛡</h3><b>Crash-resistant</b><br/><sub>3-layer defense<br/>PID lock · EPIPE · state heal</sub></td>
-  <td align="center" width="20%"><h3>🎚</h3><b>HUD-aware</b><br/><sub>statusline shim<br/>tees cc-hud if installed</sub></td>
+  <td align="center" width="20%"><h3>◨</h3><b>Interactive Setup</b><br/><sub>5-stage wizard<br/>auto-detect IDs</sub></td>
+  <td align="center" width="20%"><h3>◐</h3><b>IM-agnostic</b><br/><sub>Lark today<br/>adapter pattern</sub></td>
+  <td align="center" width="20%"><h3>◉</h3><b>Per-project Intents</b><br/><sub>JSON-defined<br/>Claude executes</sub></td>
+  <td align="center" width="20%"><h3>▣</h3><b>Crash-resistant</b><br/><sub>3-layer defense<br/>PID lock · EPIPE · state heal</sub></td>
+  <td align="center" width="20%"><h3>█▌</h3><b>HUD-aware</b><br/><sub>statusline shim<br/>tees cc-hud if installed</sub></td>
 </tr>
 </table>
 
