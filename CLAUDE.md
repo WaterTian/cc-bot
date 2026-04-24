@@ -8,7 +8,7 @@
 cc-bot/
 ├── .claude-plugin/
 │   ├── plugin.json              # 插件元数据（name / version / commands / skills）
-│   └── marketplace.json         # marketplace 注册（发布时用，TODO）
+│   └── marketplace.json         # marketplace 入口注册（`/plugin marketplace add WaterTian/cc-bot` 读此文件）
 ├── package.json                 # npm 元数据
 ├── adapters/                    # IM 抽象层
 │   ├── base.js                  # IMAdapter 基类（接口定义）
@@ -24,7 +24,8 @@ cc-bot/
 │   ├── setup.md                 # /cc-bot:setup
 │   ├── start.md / stop.md       # /cc-bot:start / /cc-bot:stop
 │   ├── new-profile.md           # /cc-bot:new-profile <name>
-│   └── switch.md                # /cc-bot:switch <name>
+│   ├── switch.md                # /cc-bot:switch <name>
+│   └── doctor.md                # /cc-bot:doctor（v0.1.2+ 健康检查）
 ├── templates/
 │   └── template.json            # profile 模板，setup 时 copy 到目标项目 .cc-bot/profiles/
 ├── .claude/
@@ -63,6 +64,7 @@ cc-bot/
 | `/cc-bot:stop` 或 `关bot` / `关闭bot` / `停bot` | 停 Monitor、发下线通知 |
 | `/cc-bot:new-profile <name>` | 从 template 生成新 profile |
 | `/cc-bot:switch <name>` | 切换激活 profile |
+| `/cc-bot:doctor` | 只读健康检查（版本漂移 / profile / 运行时 / 僵尸权限 / shim / lark-cli auth） |
 
 ## 关键约束
 

@@ -142,7 +142,6 @@ Bot 进入休眠，群消息将不再响应
 |------|------|
 | `.cc-bot/profiles/active.json` | 当前激活的项目配置（启动时必读） |
 | `.cc-bot/runtime/state.json` | 运行时状态（paused / last_processed_time / pending_confirm / monitor_task_id） |
-| `.cc-bot/runtime/poll.js` | API 轮询主进程（Monitor 工具托管） |
 | `.cc-bot/runtime/poll.pid` | poll.js 单例锁 pid 文件（启动时写入，退出时清理） |
 | `.cc-bot/runtime/poll.emitted` | 已推送 message_id 去重表（最近 200 条） |
 | `.cc-bot/runtime/member-cache.json` | 成员缓存（open_id → `{name, role}`） |
@@ -516,7 +515,7 @@ subagent 完成时主会话收到自动通知（`run_in_background` 机制）。
 - 实现上**以 CC `UserPromptSubmit` hook fire 为准**（CC 不区分 prompt 来源）—— `/loop` / `ScheduleWakeup` / `CronCreate` / `RemoteTrigger` / `claude -p` / Task/subagent 完成（bug #16952 假 fire）等自动场景也会触发锁，一视同仁
 - Monitor 事件注入（群消息 push 路径）**不走** `UserPromptSubmit`，不会自锁
 
-**这不是 bug，是设计**：主会话是单线程，上述"自动任务"场景下主会话本就被占用，群消息 emit 过去也没法响应。锁只是把"主会话忙没理你"变成群里显式占位「主窗口处理中，稍后」，体验更好不更差。
+**这不是 bug，是设计**：主会话是单线程，上述"自动任务"场景下主会话本就被占用，群消息 emit 过去也没法响应。锁只是把"主会话忙没理你"变成群里显式占位（从 14 条文案池随机一条，详见 `runtime/poll.js` `BUSY_PLACEHOLDERS`），体验更好不更差。
 
 **机制**（poll.js 层拦截，主会话无感知）：
 
@@ -524,7 +523,7 @@ subagent 完成时主会话收到自动通知（`run_in_background` 机制）。
    - `UserPromptSubmit` → `node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js lock` 写 `.cc-bot/runtime/main-busy.lock`
    - `Stop` → `node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js unlock` 删锁 + 删通知标志
 2. poll.js 每 tick 开头 `checkMainBusy()`：
-   - 锁存在 + 未过期 → **仍 fetch 但不 emit**（消息不进主会话事件队列）；首次见到新消息发群占位「主窗口处理中，稍后」+ 写 `main-busy-notified.flag` 同锁周期内静默
+   - 锁存在 + 未过期 → **仍 fetch 但不 emit**（消息不进主会话事件队列）；首次见到新消息发群占位（14 条文案池随机一条）+ 写 `main-busy-notified.flag` 同锁周期内静默
    - 锁存在 + 过期（> 10min）→ 强制删锁 + 写 `events.log` 告警 `BOT_WARN|main-busy-lock-expired|ttl-600000ms`
    - 锁不存在 → 正常 emit NEW_MSG
 3. 主会话响应完（Stop）→ 锁 + flag 同时删 → 下一 tick（≤ 30s）恢复正常 fetch，积压消息通过 `poll.emitted` 去重机制补 emit，不会丢
@@ -596,7 +595,7 @@ Bot 长跑时，主上下文每省一点，长期累积明显。**即便还在 <
 
 - `git add` 指定文件，不要 `-A` / `.`（防止误提 .cc-bot/bot_temp、.secret.json 等）
 - commit message：`fix:` / `feat:` / `refactor:` / `chore:` + 一句话主旨 + 空行 + 列出改动项
-- 工程改动（skill、member-cache、monitor.sh）可合进 fix/feat commit，但不上群
+- 工程改动（SKILL / member-cache / poll.js / adapter 等）可合进 fix/feat commit，但不上群
 - push 失败不重试，发群"push 失败：{错误}，需要你检查网络/凭据"
 
 ## 回复格式
