@@ -4,6 +4,12 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.9] - 2026-04-24
+
+- feat: 主会话忙碌占位文案池 14 条随机（替代固定"主窗口处理中，稍后"）
+- docs: SKILL 整体梳理 -44 行
+- docs: README 参考 cc-hud 统一风格 — Bun TIP + Unicode 图标 + 卖点 tagline
+
 ## [0.1.8] - 2026-04-24
 
 - fix: 升级路径自愈 + doctor tokenStatus 分档 + SKILL ! 命令 caveat
