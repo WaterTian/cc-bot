@@ -131,11 +131,10 @@ cc-bot v{version} 已下线
 Bot 进入休眠，群消息将不再响应
 ```
 
-**`{version}` 字段来源**：Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` 的 `version`。让群成员和开发者一眼看到当前 bot 版本，避免"你在跑哪个版本"这类反复追问。HUD 不可用时 version 仍保留在首行（版本是静态信息，不依赖 HUD）。
-
 **字段规则：**
-- 模型 / 上下文字段来源、模型 fallback、进度条 / 百分比 / 绝对值格式均同 §HUD 状态推送的「字段来源 / 模型显示规则 / 进度条」
-- HUD 不可用时两通知都**静默**省略模型 + 上下文两行（保留首行和末行）；不贴安装命令到群里
+- `{version}`：Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` 的 `version`；HUD 不可用时仍保留（版本是静态信息）
+- 模型 / 上下文 / 进度条等字段来源同 §HUD 状态推送
+- HUD 不可用时静默省略模型 + 上下文两行（保留首行和末行），不贴安装命令
 
 ## 运行时文件
 
@@ -170,7 +169,7 @@ Bot 进入休眠，群消息将不再响应
 
 回复群消息时用 `member-cache.json` 里的真实 `name` 称呼对方（产品体验例外，不算泄露）。
 
-**格式示例**（实际真名应为群成员真实姓名，这里用角色占位；`setup` 完毕后默认只有管理员一条）：
+**格式示例**（真名用角色占位；setup 后默认只一条 admin）：
 
 ```json
 {
@@ -179,11 +178,6 @@ Bot 进入休眠，群消息将不再响应
   "ou_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz": { "name": "王测试", "role": "member" }
 }
 ```
-
-- 键 = 飞书 `open_id`（`ou_` 前缀 + 32 位 hex）
-- `name` = `lark-cli contact +get-user` 返回的 `name` / `en_name`
-- `role` = `admin`（白名单内）或 `member`（默认）
-- 新成员首次发言时按 §处理消息 SOP step 3 自动追加条目
 
 ### 权限矩阵（按 intent 类别，具体键由 profile.intents 自定义）
 
@@ -287,39 +281,22 @@ profile 未定义的意图 → 回"当前项目未配置该操作，请检查 pr
 
 ### 最高优先级规则 1：处理完立即推进 state.json
 
-**"处理完一条消息"定义**（按分派路径分别计）：
-- **inline 路径**：已向群发了最终回复（`lark-cli +messages-reply` 成功）
-- **subagent 路径**：Agent 已派出（`run_in_background=true`）+ 占位回复已发
-- **入队路径**：已回"前面 N 个任务在跑"+ 任务写入 `agents.json.queue`
+**"处理完"定义（三路径）**：
+- inline：已发最终回复（`lark-cli +messages-reply` 成功）
+- subagent：Agent 已派出（`run_in_background=true`）+ 占位回复已发
+- 入队：已回"前面 N 个任务在跑"+ 任务写入 `agents.json.queue`
 
-**处理完的下一个工具调用必须是 `Edit state.json` 写入 `last_processed_time = {该条 time}`。** 优先级高于：下一条消息处理、部署/编译、任何"顺手再做一步"。subagent 最终结果由 subagent 自己发群、主会话收到完成通知时再处理 registry pop，**不影响 state 推进**。
+**处理完的下一个工具调用必须是 `Edit state.json` 写 `last_processed_time = {该条 time}`**，优先级高于下条处理、部署、任何"顺手再做"。漏推会导致 catch-up 时重派，同一任务跑两遍。
 
-**反例：** 主会话派出 subagent 后没推进 state，中途被 compaction/崩溃/中断。重启后 catch-up 以 `last_processed_time` 为准，把"已派但 state 未推进"的消息重新派一次，同一任务跑两遍。
-
-**正确节奏：** 分派完成（按上面三路径任一） → Edit state.json → 再做别的事。每条消息独立推进，绝不批量延迟。
-
-**`last_processed_time` 格式：毫秒时间戳（Number 或字符串形式的数字）**，和 `NEW_MSG|...|<createTimeMs>` 末段一致。若消息时间来自 `lark-cli im +chat-messages-list` 返回的字符串（如 `"2026-04-22 17:38"`），必须先转毫秒再写入：
-
-```bash
-node -e 'console.log(new Date("2026-04-22 17:38:00 +0800").getTime())'
-```
-
-**禁止**混写字符串和毫秒 —— fetch 比对会假阳/假阴，直接导致漏消息或重复回复。
+**格式：毫秒时间戳**（Number 或数字字符串），和 `NEW_MSG|...|<createTimeMs>` 末段一致。字符串时间需先转毫秒：`node -e 'console.log(new Date("2026-04-22 17:38:00 +0800").getTime())'`。**禁止混写字符串和毫秒** — fetch 比对会假阳/假阴。
 
 ### 最高优先级规则 2：处理前先 fetch 5 条核对（fetch_before_reply）
 
-收到 NEW_MSG 任务通知时，**处理该条前先 `lark-cli im +chat-messages-list --as bot --chat-id <chat_id> --page-size 5 --sort desc`**，对比 `state.json.last_processed_time`，把所有未处理消息按 `create_time` 升序逐条回复 + 推进 state。
+收到 NEW_MSG 前先 `lark-cli im +chat-messages-list --as bot --chat-id <chat_id> --page-size 5 --sort desc`，对比 `state.last_processed_time`，未处理消息按 `create_time` 升序逐条回 + 推进 state。Why：Monitor 密集时可能只推最新一条，单 push 处理会漏中间关键消息（2026-04-20 实战）。
 
-**Why：** Monitor 30s 轮询 + poll.emitted 去重，密集多条时可能只推最新一条；system-reminder 也只带一条最新 NEW_MSG。单条 push 处理会漏中间关键消息，严重破坏信任（2026-04-20 实战经验）。
+**一次 fetch 覆盖多条**：Monitor 连发或前次 fetch ≤ 10s 内可复用结果。
 
-**一次 fetch 覆盖多条（密集场景优化）**：一个 Monitor push 含多条 NEW_MSG 时（或短时间内主会话被连续唤醒），**只 fetch 一次 5-10 条**即可覆盖全部未处理消息，不必每条 NEW_MSG 都重新 fetch 一轮。判定依据：若前一次 fetch 时间距本次 ≤ 10s 且已覆盖当前 msg_id 范围，可复用结果。
-
-**特别触发 fetch 10 条：**
-- 用户情绪激动（连发"？？？"、质疑"你收到了吗"）
-- 用户连续两次 ACK 无回应 / 质疑
-- 主会话刚从长工具链回来（Edit/Bash/Agent 连续 ≥3 min）
-
-宁可多 fetch（成本低），不要漏看（信任成本高）。
+**升级到 fetch 10 条**：用户情绪激动（连发"？？？"）/ 连续 ACK 无回应 / 主会话刚跑完 ≥3min 工具链。宁可多 fetch，不要漏看。
 
 ### 完整流程
 
@@ -440,10 +417,10 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 30s 主
 | 消息类型 | 处理 | 占 slot |
 |---|---|---|
 | 控制类（群里发"开/关 bot"）| 拒绝（§开关指令的来源限制）| 否 |
-| 查询 / 闲聊 / 简单回复 / 状态 | 主会话 inline 直接回 | 否 |
-| 改动 / 长工具链（fix bug / 部署 / 发码 / 大搜索）| 派 subagent `run_in_background=true` | 是 |
+| 查询 / 闲聊 / 状态 / 单文件小改动（typo / 1-3 行 Edit）| 主会话 inline 直接回 | 否 |
+| 跨文件改动 / build-test 循环 / 部署 / 发码 / 大搜索 | 派 subagent `run_in_background=true` | 是 |
 
-判定 inline 还是 subagent 的粗标准：**会不会改代码 / 跑部署 / 读大量文件 / 预估 >2min 工具链**。命中任一走 subagent。
+判定阈值：**预估 ≤ 3 个 tool_use + 单文件 + < 30s 走 inline**，否则 subagent。上下文 > 70% 时阈值收紧（倾向 subagent 保主会话）。
 
 ### 派单前必做（顺序）
 
@@ -561,7 +538,7 @@ subagent 完成时主会话收到自动通知（`run_in_background` 机制）。
 - 占位 flag 仅在锁周期内有效，`unlock` 调用时一并删
 - `state.last_processed_time` 只由主会话推进；poll.js 不动它
 
-**测试 caveat**：`!` 前缀 bash 命令（如 `! sleep 60`）在 CC 里 UserPromptSubmit 与 Stop 接近同时 fire，lock 生命周期只有毫秒级，无法跨 poll tick（30s）。测主窗口优先级机制**必须用真实 Claude prompt**（让 Claude 实际生成 ≥30s 输出，例如"读某文档并生成 500 字总结"），`!` bash 会漏测。
+**测试 caveat**：`!` 前缀 bash 命令 UserPromptSubmit / Stop 毫秒级 fire，跨不了 poll tick（30s），会漏测。测本机制用真实 Claude prompt（≥30s 输出）。
 
 ## 运行时节奏（长会话反崩溃）
 
@@ -624,8 +601,10 @@ Bot 长跑时，主上下文每省一点，长期累积明显。**即便还在 <
 
 ## 回复格式
 
-- 简洁工具风，只返回结果
-- 图片用 `lark-cli im +messages-send --as bot --chat-id <群ID> --image <相对路径>`
+- 简洁工具风，只返回结果。首行一句话结论（"已修"/"已部署"/"失败：<原因>"），细节用户问再给
+- 避开四类长病：**修改流水账** / **主动解释 why** / **汇报内部动作** / **客套和复述** —— 群成员都不想看
+- 代码 / log / 长输出走截图或独立 code block，不混叙述
+- 图片：`lark-cli im +messages-send --as bot --chat-id <群ID> --image <相对路径>`
 
 ### 情绪价值（与简洁并不冲突）
 
@@ -643,6 +622,7 @@ Bot 长跑时，主上下文每省一点，长期累积明显。**即便还在 <
 **措辞尺度**
 
 - 道歉直接：「抱歉」「是我想错了」「我漏了」— 不要"感谢指出"这种客套
+- **不过度道歉**：一件事只道歉 1 次；道完立刻进入动作，不要"再次抱歉"；小错（typo / 格式小失误 / 单字误读）直接改，别道歉；连续对话里不要每条都带"抱歉"开头 —— 反复道歉反而让人觉得心虚
 - 允许温和的单字符情绪标记：`🙏`（致歉）、`✅`（完成）— 一条回复最多 1 个，紧贴动作词（"修好了 🙏"），不做装饰
 - 禁用彩虹式 emoji、拟人语气（"小助手正在帮您..."）、感叹号堆砌
 
@@ -689,6 +669,8 @@ bot ：部署失败：依赖缺失，换 MCP 重试
 bot ：部署完，出码
 bot ：[preview-qr.png]
 ```
+
+## 执行细节
 
 ### 统一截图目录
 
@@ -763,42 +745,18 @@ HUD 数据由独立插件 **cc-hud** 写入 `.cc-bot/runtime/hud-stdin.json`。c
 
 ### HUD 不可用时的处理（hud-stdin.json 缺失或空）
 
-**群回复**（简洁，不往群里贴命令，群成员看不懂）：
-```
-HUD 数据暂不可用
-```
+**群回复**：`HUD 数据暂不可用`（不贴命令，群成员看不懂）
 
-**同时在主会话里**向开发者输出一条工程提示，**仅以下场景触发**：
-- `/cc-bot:start` 上线通知拼 HUD 段失败
-- 群里显式问「状态/HUD」
-- 开发者主动调试 HUD
+**主会话同时输出工程提示**（仅 `/cc-bot:start` 拼 HUD 失败 / 群里问 HUD / 主动调试 时触发；`/cc-bot:stop` 不触发）：
+- 检测 shim：`grep -q 'cc-bot.*statusline\.js' ~/.claude/settings.json` 判断已注册 / 未注册
+- **未注册**：提示"重跑 `/cc-bot:setup`（step 7 会注册），重开 CC 会话，下次 statusline tick 生成 hud-stdin.json"
+- **已注册但文件缺失**：提示排查三点 — ①CC 刚启动未 tick（跑一次工具调用）②shim 路径错（查 settings.json 的 `statusLine.command`）③shim 静默失败（终端手跑 `echo '{}' | node <路径>/runtime/statusline.js`）
 
-**不触发的场景：** `/cc-bot:stop` 下线通知（用户正在关 bot，此时刷排查信息没意义）。
-
-HUD 数据由 cc-bot 自己的 statusline shim（`runtime/statusline.js`）落盘。检测 shim 是否已注册到 `~/.claude/settings.json`：
-
-```bash
-grep -q 'cc-bot.*statusline\.js\|statusline\.js.*cc-bot' ~/.claude/settings.json 2>/dev/null && echo registered || echo unregistered
-```
-
-**未注册（`unregistered`）**：
-```
-ℹ️ cc-bot statusline shim 未注册到 ~/.claude/settings.json。重跑 /cc-bot:setup（步骤 7 会自动注册），然后重开 CC 会话；下一次 statusline tick（任意工具调用后）即可生成 hud-stdin.json。
-```
-
-**已注册但未触发（`registered`，但 hud-stdin.json 仍缺失/空）**：
-```
-ℹ️ statusline shim 已注册但 hud-stdin.json 未生成。可能原因：
-  1. CC 刚启动未触发过 statusline tick → 随便执行一次工具调用后再看
-  2. CC 版本 / shim 路径错位 → 检查 ~/.claude/settings.json 的 statusLine.command，确认 ${CLAUDE_PLUGIN_ROOT}/runtime/statusline.js 解析到真实路径
-  3. shim 异常静默失败 → 在终端手动跑 `echo '{}' | node <插件路径>/runtime/statusline.js` 观察是否报错
-```
+按 §工程性改动不发群，工程提示只在主会话显示，不进群。
 
 ### cc-hud 与 statusline 的关系
 
-cc-hud 是独立的 statusline **渲染器**（stdin JSON → stdout 渲染结果），它**不写文件**。cc-bot 的 shim 包了一层：先落盘 stdin JSON 给 cc-bot 用，再透传给 cc-hud 渲染状态栏。两者互不冲突、可共存，装不装 cc-hud 都不影响 cc-bot 的 HUD 群消息功能（只影响状态栏是否美观）。
-
-这两个工程提示都按 §工程性改动不发群 规则**只在主会话展示，不进群**。
+cc-hud 是独立 statusline **渲染器**（stdin JSON → stdout，不写文件）。cc-bot 的 shim 包一层：先落盘 stdin JSON 给 bot 用，再透传给 cc-hud 渲染状态栏。互不冲突可共存，装不装 cc-hud 不影响 bot HUD 群消息功能（只影响状态栏美观）。
 
 ### HUD 可用时的群消息格式
 
