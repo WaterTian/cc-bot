@@ -561,6 +561,8 @@ subagent 完成时主会话收到自动通知（`run_in_background` 机制）。
 - 占位 flag 仅在锁周期内有效，`unlock` 调用时一并删
 - `state.last_processed_time` 只由主会话推进；poll.js 不动它
 
+**测试 caveat**：`!` 前缀 bash 命令（如 `! sleep 60`）在 CC 里 UserPromptSubmit 与 Stop 接近同时 fire，lock 生命周期只有毫秒级，无法跨 poll tick（30s）。测主窗口优先级机制**必须用真实 Claude prompt**（让 Claude 实际生成 ≥30s 输出，例如"读某文档并生成 500 字总结"），`!` bash 会漏测。
+
 ## 运行时节奏（长会话反崩溃）
 
 ### Agent 优先策略（默认思路）

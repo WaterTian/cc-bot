@@ -239,14 +239,17 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
 
    b. Detect current statusLine state:
       - `settings.statusLine` 不存在 → `UNSET`
-      - `settings.statusLine.command` 已是 cc-bot shim（含 `cc-bot` 且含 `statusline.js`）→ `ALREADY_CC_BOT`
+      - `settings.statusLine.command` 已是 cc-bot shim（含 `cc-bot` 且含 `statusline.js`）→ 比较现有命令字符串与目标字符串（即 `${CLAUDE_PLUGIN_ROOT}` 展开后的当前路径版本）：
+        - 完全相等 → `ALREADY_CC_BOT_CURRENT`
+        - 不相等（旧版本号、其他 plugin 根等）→ `ALREADY_CC_BOT_STALE`
       - `settings.statusLine.command` 是 cc-hud（含 `cc-hud`）→ `CC_HUD_ONLY`（shim 会自动 tee，安全覆盖）
       - 其他非空值 → `OTHER`（用户自定义 / 第三方 statusline）
 
    c. Based on state:
       - `UNSET` → 直接写入；告知 `✓ 首次注册 statusLine（cc-bot shim）`
       - `CC_HUD_ONLY` → 覆盖 + **明确告知用户**：`ℹ️ 检测到原 statusLine 是直接调用 cc-hud，已改为经 cc-bot shim 包装（shim 会 tee cc-hud 渲染，状态栏视觉不变，额外把 HUD 数据落盘给 bot 用）`
-      - `ALREADY_CC_BOT` → 跳过写入，告诉用户 `✓ statusline shim 已注册（幂等跳过）`
+      - `ALREADY_CC_BOT_CURRENT` → 跳过写入，告诉用户 `✓ statusline shim 已注册（幂等跳过）`
+      - `ALREADY_CC_BOT_STALE` → 覆盖（写入当前路径）+ 告知 `✓ statusline shim 路径已刷新（旧：{旧 command} → 新：{当前 command}）` — 处理升级后路径仍指旧缓存版本的场景
       - `OTHER` → 先 `AskUserQuestion` 确认：
         ```
         AskUserQuestion({
@@ -306,12 +309,15 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
    
    c. 幂等合并：对于 `UserPromptSubmit` 和 `Stop` 两个事件各自做：
       - 若 `hooks[event]` 不存在 / 空数组 → 整段写入
-      - 若已存在条目：扫描所有 `.hooks[].command`，若**已有任一**命令含 `main-busy.js lock`（或 unlock）→ ✓ 幂等跳过
+      - 若已存在条目：扫描所有 `.hooks[].command`，若**已有命令**含 `main-busy.js lock`（UserPromptSubmit）或 `main-busy.js unlock`（Stop）：
+        - 该命令**完全等于**目标字符串（`${CLAUDE_PLUGIN_ROOT}` 展开后） → ✓ 幂等跳过
+        - 该命令含 `main-busy.js` 但不等（旧版本号、其他 plugin 根等）→ **替换该条目** 为当前目标字符串
       - 若存在非 cc-bot 的其他 hook 条目 → append 新 matcher（不删用户已有的）
    
    d. Tell user：
       - 首次注册 → `✓ 已注册 main-busy hook 到 ~/.claude/settings.json（主窗口对话期间群消息自动让路）`
       - 幂等跳过 → `✓ main-busy hook 已就位（跳过）`
+      - 路径刷新（旧 main-busy 命令被替换）→ `✓ main-busy hook 路径已刷新（旧：{old} → 新：{current}）`
       - 新增但保留了其他 hook → `✓ 已追加 main-busy hook（保留你现有的其他 {event} hook）`
 
 10. **注册 Monitor 通配权限**到 `<project>/.claude/settings.local.json`，让 cc-bot 版本升级后不再被 CC 反复询问权限。

@@ -61,7 +61,10 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 ### 5. Statusline shim (`~/.claude/settings.json`)
 
 - Read `~/.claude/settings.json`。不存在 → ⚠ 未注册
-- `statusLine.command` 含 `cc-bot` 且含 `statusline.js` → ✓
+- `statusLine.command` 含 `cc-bot` 且含 `statusline.js` → 进一步查路径（`${CLAUDE_PLUGIN_ROOT}` 展开后的绝对路径）：
+  - 路径含 `/plugins/cache/cc-bot/cc-bot/<ver>/` 且 `<ver>` = 本地缓存当前版本 → ✓
+  - 路径含 cache 但 `<ver>` 过期（不等于当前本地缓存版本）→ ⚠ 路径指向旧缓存版本，升级后未同步；建议重跑 `/cc-bot:setup`（step 8 会覆盖为当前路径）
+  - 路径不在 cache 下（指向 `D:/Projects/cc-bot` 等本地开发仓）→ ⚠ 路径非 cache，若该仓被移动或删除会失效；建议在正式（非 `--plugin-dir`）CC 会话里重跑 `/cc-bot:setup`
 - 含 `cc-hud` 不含 cc-bot → ⚠ shim 未经 cc-bot 包装，`hud-stdin.json` 不会落盘
 - 其他值 / 缺失 → ⚠ 建议重跑 `/cc-bot:setup`（step 8 会幂等注册）
 - ✓ 时进一步查 `.cc-bot/runtime/hud-stdin.json` 是否存在：
@@ -71,7 +74,10 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 ### 5b. Main-busy hook (`~/.claude/settings.json`, v0.1.6+)
 
 同一份 `~/.claude/settings.json`，查 `hooks.UserPromptSubmit` / `hooks.Stop` 两个事件：
-- 任一事件下 `.hooks[].command` 含 `main-busy.js lock`（UserPromptSubmit）或 `main-busy.js unlock`（Stop）→ ✓
+- 任一事件下 `.hooks[].command` 含 `main-busy.js lock`（UserPromptSubmit）或 `main-busy.js unlock`（Stop） → 进一步查路径（规则同 §5）：
+  - cache 路径且版本号 = 本地缓存当前版本 → ✓
+  - cache 路径但版本号过期 → ⚠ 建议重跑 `/cc-bot:setup`（step 9 会覆盖为当前路径）
+  - 非 cache（指向本地开发仓）→ ⚠ 建议在正式（非 `--plugin-dir`）CC 会话里重跑 `/cc-bot:setup`
 - 两个事件都缺 → ⚠ 未注册（主窗口对话期间群消息不会让路）→ 建议重跑 `/cc-bot:setup`（step 9 会幂等注册）
 - 只有一个 → ⚠ 半注册，另一侧缺失会导致锁永不解或永不上
 - 额外查 `.cc-bot/runtime/main-busy.lock` 存活状态：
@@ -82,9 +88,12 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 ### 6. lark-cli
 
 - `lark-cli --version` 成功？✗ if not found → `npm i -g @larksuite/cli`
-- `lark-cli auth list`（默认输出 JSON，不要加 `--format json`）返回非空 `[]`？
-  - 空 → ✗ 未登录，`lark-cli auth login`
-  - 非空 → ✓，列出 appId / userName
+- `lark-cli auth list`（默认输出 JSON，不要加 `--format json`）：
+  - 空 `[]` → ✗ 未登录，建议 `lark-cli auth login`
+  - 非空 → 列出 appId / userName，按每条的 `tokenStatus` 分档：
+    - `active` → ✓
+    - `needs_refresh` → **ℹ**（不是 ⚠）：access_token 过期但 refresh_token 仍可用，下一次 API 调用会自动续，**不要建议用户 `auth login`**
+    - `revoked` / `expired`（指 refresh_token 级）/ `invalid` / 其他异常 → ⚠ 建议 `lark-cli auth login`
 
 ### 7. cc-hud (optional)
 
