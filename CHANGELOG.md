@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.8] - 2026-04-24
+
+- fix: 升级路径自愈 + doctor tokenStatus 分档 + SKILL ! 命令 caveat
+
 ## [0.1.7] - 2026-04-24
 
 - docs: SKILL 精简 17 行 + 清除 8 处外发死链 memory 引用
