@@ -93,6 +93,27 @@ const MAIN_BUSY_LOCK = path.join(RUNTIME_DIR, 'main-busy.lock')
 const MAIN_BUSY_NOTIFIED_FLAG = path.join(RUNTIME_DIR, 'main-busy-notified.flag')
 const MAIN_BUSY_TTL_MS = 10 * 60 * 1000  // 10min 硬编码过期兜底
 
+// 主会话忙碌时的群占位文案池（每次随机一条，避免机械重复）
+const BUSY_PLACEHOLDERS = [
+  '⏳ 主会话在忙，稍后回你',
+  '☕ 手头忙，消息记下了',
+  '⌨️ 在敲代码，稍等啊..',
+  '💭 思考中，过会儿回话',
+  '🔧 在修东西，稍等..',
+  '📝 正在写东西，消息排队了',
+  '🏃 跑任务中，马上回来',
+  '🎯 专注中，稍后回你',
+  '🫖 正在泡茶，等一下下',
+  '🐢 我手慢，请多担待',
+  '🧩 拼图差一块，马上好',
+  '🔭 对焦中，别急..',
+  '📮 消息已签收，稍候奉上',
+  '🎮 在打个小 boss..马上回',
+]
+function pickBusyPlaceholder() {
+  return BUSY_PLACEHOLDERS[Math.floor(Math.random() * BUSY_PLACEHOLDERS.length)]
+}
+
 let consecutiveFailures = 0
 let alertedOnce = false
 
@@ -261,7 +282,7 @@ async function sendMainBusyPlaceholder() {
     if (fs.existsSync(MAIN_BUSY_NOTIFIED_FLAG)) return
   } catch { return }
   try {
-    await adapter.sendText({ chatId: CHAT_ID, text: '主窗口处理中，稍后' })
+    await adapter.sendText({ chatId: CHAT_ID, text: pickBusyPlaceholder() })
     fs.writeFileSync(MAIN_BUSY_NOTIFIED_FLAG, String(Date.now()))
   } catch {
     // 占位发送失败静默 — 主业务不受影响
