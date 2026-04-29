@@ -1,6 +1,6 @@
 {
   "name": "cc-bot",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Claude Code 驱动的 IM 群 AI 项目助手 — 飞书（Lark）起步，IM 可扩展",
   "engines": {
     "node": ">=18.0.0"

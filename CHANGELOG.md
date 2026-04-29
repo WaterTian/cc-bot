@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.10] - 2026-04-29
+
+- feat: v0.1.10 — @他人不搭理 + Mac 系统适配
+
 ## [0.1.9] - 2026-04-24
 
 - feat: 主会话忙碌占位文案池 14 条随机（替代固定"主窗口处理中，稍后"）
