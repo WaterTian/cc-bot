@@ -97,20 +97,23 @@ cp scripts/blocklist.txt.example scripts/blocklist.txt
 
 ## 发版流程（维护者）
 
-一键 bump 脚本 `scripts/release.js`：原子更新 `plugin.json` + `marketplace.json` + `package.json` 三处版本号、prepend CHANGELOG.md、commit、tag。
+一键 bump 脚本 `scripts/release.js`：原子更新 `plugin.json` + `marketplace.json` + `package.json` 三处版本号、prepend CHANGELOG.md、commit、tag、（可选）push、（可选）建 GitHub Release。
 
 ```bash
-node scripts/release.js patch          # 0.1.1 → 0.1.2（默认不推，手工 git push）
-node scripts/release.js patch --push   # 一把梭：写文件 + commit + tag + push main + push tag
-node scripts/release.js minor --dry    # 预览，不写文件（看 changelog entry 合理再执行）
-node scripts/release.js 0.2.0          # 指定具体版本号
+node scripts/release.js patch              # 0.1.1 → 0.1.2（默认不推，手工 git push）
+node scripts/release.js patch --push       # 写文件 + commit + tag + push main + push tag
+node scripts/release.js patch --release    # 一把梭：上面全部 + 自动 gh release create（推荐）
+node scripts/release.js minor --dry        # 预览，不写文件（看 changelog entry 合理再执行）
+node scripts/release.js 0.2.0              # 指定具体版本号
 ```
+
+**`--release` 隐含 `--push`**，需要 `gh` CLI 已装并登录。仅 push tag 不会自动出现在 GitHub releases 页面（v0.1.10 撞过此坑），用 `--release` 一把梭最稳。
 
 **一定要用 `node scripts/release.js` 直接调**，不要走 `npm run release`。原因：`npm run release patch --dry` 里 `--dry` 会被 npm 吞掉不传给脚本（见 memory `feedback_npm_run_flag_passthrough`），导致本来想 dry 预览的误跑成真实 release。若坚持走 npm，用 `npm run release -- patch --dry`（`--` 分隔符原样转发）。
 
 preflight 校验：必须在 main 分支、工作区干净、目标 tag 不存在。
 
-发版顺序：① 业务/功能性 commit 先做完、全部推上 main → ② `node scripts/release.js <bump>` bump → ③ 使用 cc-bot 的项目按 README §Updating 跑 3 条命令拉新版。
+发版顺序：① 业务/功能性 commit 先做完、全部推上 main → ② `node scripts/release.js <bump> --release` 一把梭 → ③ 使用 cc-bot 的项目按 README §Updating 跑 3 条命令拉新版。
 
 ## 先决条件（使用 cc-bot 的项目需要）
 

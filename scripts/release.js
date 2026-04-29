@@ -10,6 +10,8 @@
 // Flags:
 //   --dry         preview changes, write nothing
 //   --push        after commit + tag, push main + tag to origin
+//   --release     after push, also create a GitHub Release via `gh release create`
+//                 (implies --push; reads CHANGELOG entry as release notes; needs `gh` CLI)
 //   --no-commit   write files only, don't git add / commit / tag
 //
 // Safety:
@@ -56,17 +58,18 @@ function writeJson(p, obj) { fs.writeFileSync(p, JSON.stringify(obj, null, 2) + 
 
 function parseArgs() {
   const argv = process.argv.slice(2)
-  const flags = { dry: false, push: false, commit: true }
+  const flags = { dry: false, push: false, release: false, commit: true }
   const positional = []
   for (const a of argv) {
     if (a === '--dry') flags.dry = true
     else if (a === '--push') flags.push = true
+    else if (a === '--release') { flags.release = true; flags.push = true }  // --release 隐含 --push
     else if (a === '--no-commit') flags.commit = false
     else if (a.startsWith('--')) die(`unknown flag: ${a}`)
     else positional.push(a)
   }
   if (positional.length !== 1) {
-    die('usage: node scripts/release.js <patch|minor|major|X.Y.Z> [--dry] [--push] [--no-commit]')
+    die('usage: node scripts/release.js <patch|minor|major|X.Y.Z> [--dry] [--push] [--release] [--no-commit]')
   }
   return { bump: positional[0], flags }
 }
@@ -195,6 +198,36 @@ function main() {
     log('')
     log('Not pushed. To publish:')
     log(`  git push origin main && git push origin v${next}`)
+  }
+
+  if (flags.release) {
+    // 检测 gh CLI
+    let ghOk = false
+    try { run('gh --version'); ghOk = true } catch {}
+    if (!ghOk) {
+      log('')
+      log('⚠ gh CLI 未安装/不可用，跳过 GitHub Release 创建。手工补：')
+      log(`  gh release create v${next} --title "v${next}" --notes "<paste CHANGELOG entry>"`)
+      return
+    }
+    // 把刚 prepend 的 entry 作为 release notes
+    const tmp = path.join(ROOT, '.release-notes.tmp')
+    fs.writeFileSync(tmp, entry.trim() + '\n')
+    try {
+      const url = run(`gh release create v${next} --title "v${next}" --notes-file "${tmp}"`)
+      log(`✓ GitHub Release created: ${url}`)
+    } catch (err) {
+      log('')
+      log(`⚠ gh release create 失败：${err.message}`)
+      log(`手工补：gh release create v${next} --title "v${next}" --notes-file CHANGELOG.md`)
+    } finally {
+      try { fs.unlinkSync(tmp) } catch {}
+    }
+  } else if (flags.push) {
+    log('')
+    log('GitHub Release 未创建。要建：')
+    log(`  gh release create v${next} --title "v${next}" --notes-file CHANGELOG.md`)
+    log('或下次直接用 --release（隐含 --push + 建 release 一把梭）。')
   }
 }
 
