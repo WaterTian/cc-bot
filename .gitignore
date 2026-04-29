@@ -24,4 +24,5 @@ scripts/hooks/
 
 # 测试产物（含真名/真 ID，本地保留不进库）
 FEEDBACK-*.md
+FEEDBACK.md
 REGRESSION-*.md

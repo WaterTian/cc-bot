@@ -6,7 +6,8 @@ Release history is authoritative at the git tag level — see [GitHub releases](
 
 ## [0.1.10] - 2026-04-29
 
-- feat: v0.1.10 — @他人不搭理 + Mac 系统适配
+- feat: @他人不搭理 — poll.js 加 mention filter，群里 @ 他人的消息默认不响应（多人协作群降噪）；profile 新增 `im.bot_open_id` 选填字段，配后精准识别"@bot 自己"，未配则保守模式（任何 @ 一律 skip，包括 @ bot — 用自然语言无 @ 即可触发）
+- feat: Mac / Linux 系统适配（**实验性**）— `commands/setup.md` Monitor 通配权限按 `process.platform` 选 win32/darwin/linux 模板；`commands/stop.md` 验证残留 poll.js 加 Unix 分支（pgrep -f + kill）；SKILL §关闭流程 / §Shell 安全规范 加 Unix 等价；CLAUDE.md / README.md Prerequisites 去 Windows-only 措辞。代码改动小（绝大部分原本就是跨平台 JS + bash），Mac 端尚未实测，待用户反馈再加固
 
 ## [0.1.9] - 2026-04-24
 
