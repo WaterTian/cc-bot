@@ -326,9 +326,10 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
 
    b. 确保 `permissions.allow` 是数组（缺失则创建 `permissions: { allow: [] }`）。
 
-   c. 构造通配规则（按平台；Windows 为主，同时加 Unix 模板兼顾未来跨平台）：
-      - Windows：`Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)`
-      - 当前只写 Windows 模板即可（cc-bot 主要用户在 Windows；Mac/Linux 适配后再补）
+   c. 构造通配规则（按 `process.platform` 选模板，仅注册当前平台的模板，避免 settings.local.json 里堆冗余无效规则）：
+      - **Windows**（`win32`）：`Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)`
+      - **macOS**（`darwin`）：`Bash(node /Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)`
+      - **Linux**（`linux`）：`Bash(node /home/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)`
 
    d. 扫 `permissions.allow[]`：
       - 若**已有完全相同**的通配规则 → ✓ 幂等跳过
@@ -338,7 +339,7 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
    e. Tell user：
       - 首次注册 → `✓ 已加通配 Monitor 权限到 .claude/settings.local.json（升级 cc-bot 版本不会再弹权限询问）`
       - 幂等跳过 → `✓ Monitor 通配权限已就位（跳过）`
-      - 发现硬编码僵尸 → `⚠ 检测到 N 条硬编码版本路径的旧权限规则（位置 .claude/settings.local.json）。建议手工替换为通配：\nBash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)`
+      - 发现硬编码僵尸 → `⚠ 检测到 N 条硬编码版本路径的旧权限规则（位置 .claude/settings.local.json）。建议手工替换为通配（按当前平台模板）。`
 
 11. **检测 cc-hud 安装状态**（决定完成提示里附加哪段 hint）：
    ```bash

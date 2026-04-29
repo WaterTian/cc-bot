@@ -3,7 +3,9 @@
 // 外部依赖：`lark-cli` 已在 PATH、已 `auth login`（bot + user 身份）。
 // 所有子命令都强制 LARK_CLI_NO_PROXY=1，规避 vpn 代理下 WS/HTTPS 静默断流问题。
 //
-// Windows 下显式用 `lark-cli.cmd`，避开 Node 20+ spawn 不再自动解析 .cmd 扩展的问题。
+// 跨平台：统一通过 bash 作为 shell 执行（Windows 借 Git Bash，macOS/Linux 系统自带）。
+// 用裸 `lark-cli` 名 + bash 解析 PATH 找到对应可执行（Windows: lark-cli.cmd / Unix: lark-cli），
+// 避开 Node 20+ spawn 不再自动解析 .cmd 扩展、且 npm batch shim 处理特殊字符不安全的问题。
 
 const { execSync } = require('child_process')
 const path = require('path')
@@ -97,6 +99,7 @@ class LarkAdapter extends IMAdapter {
           type: m.msg_type,
           content: sanitize(m.content),
           createTimeMs: parseCreateTimeMs(m.create_time),
+          mentions: Array.isArray(m.mentions) ? m.mentions : [],
           raw: m,
         }
       })

@@ -81,6 +81,7 @@ try {
 }
 
 const CHAT_ID = im.chat_id
+const BOT_OPEN_ID = im.bot_open_id || ''  // 可选：配了精准识别"@bot 自己"的消息；未配时保守 — 任何 @ 一律 skip
 const CHECK_INTERVAL_MS = Number(profile.polling_interval_ms) || 30 * 1000
 const PAGE_SIZE = 10
 const EMITTED_MAX = 200
@@ -258,6 +259,15 @@ async function pollMessages() {
   }
 }
 
+// ========== @他人消息过滤（v0.1.10）==========
+// mentions 非空 + bot 不在 mention 列表 → 视为 @他人，skip emit。
+// BOT_OPEN_ID 未配时保守：任何 mentions 非空都 skip（@bot 也会被忽略，等用户配 bot_open_id 才精准）。
+function isAtOthers(mentions) {
+  if (!Array.isArray(mentions) || mentions.length === 0) return false
+  if (!BOT_OPEN_ID) return true  // 保守模式
+  return !mentions.some(mt => mt && mt.id && mt.id.open_id === BOT_OPEN_ID)
+}
+
 // ========== 主会话优先级：锁检测 + 占位 ==========
 
 function checkMainBusy() {
@@ -323,6 +333,12 @@ async function tick() {
     if (m.senderType === 'bot') continue
     if (!VALID_TYPES.has(m.type)) continue
     if (!m.createTimeMs || m.createTimeMs <= lastTime) continue
+
+    // @他人过滤：视为已处理（append emitted），下次不再扫
+    if (isAtOthers(m.mentions)) {
+      newlyEmitted.push(m.id)
+      continue
+    }
 
     if (mainBusy) {
       // 主窗口忙：不 emit、不记 emitted，等解锁后下一 tick 正常处理

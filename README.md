@@ -254,7 +254,7 @@ Works for **any project type** — Web / mini-program / Node service / Python da
 
 - **Claude Code** — uses `Skill` / `Monitor` / `TaskStop` / `AskUserQuestion` tools
 - **lark-cli** — `npm i -g @larksuite/cli` + `lark-cli auth login` (setup wizard will guide this)
-- **Git Bash on Windows** — poll.js adapter uses bash shell to pass argv safely (cmd.exe mangles special characters)
+- **Shell** — **Windows**: Git Bash required (cmd.exe / PowerShell mangle special characters in argv); **macOS / Linux**: system bash works out of the box
 - **Optional: cc-hud** — install for prettier status bar (`/plugin install cc-hud@WaterTian-cc-hud`); cc-bot shim tees it automatically
 
 <br/>

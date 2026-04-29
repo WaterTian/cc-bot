@@ -12,7 +12,7 @@ Steps:
 3. If `monitor_task_id` is set, call `TaskStop(monitor_task_id)`. Otherwise just proceed.
 4. Edit `state.json`: set `paused: true`, clear `monitor_task_id`.
 5. Read `.cc-bot/runtime/hud-stdin.json` for model/context data. If the file has valid data, include 模型 + 上下文 lines in the offline notification; if missing/empty, silently skip those lines — **下线场景不触发 cc-hud shim 排查提示**（用户正在关 bot，此时刷排查提示没意义；仅 /cc-bot:start / 群里问 HUD 时才按 SKILL §HUD 不可用时的处理 输出工程提示）。
-6. Send offline notification to `profile.im.chat_id` — **必须用 `--msg-type text --content '<JSON>'`**（同 /cc-bot:start，避免 `$'...\n...'` 在 Windows Git Bash 下发成字面 `\n`）：
+6. Send offline notification to `profile.im.chat_id` — **必须用 `--msg-type text --content '<JSON>'`**（同 /cc-bot:start；避免 Windows Git Bash 下 `$'...\n...'` 发成字面 `\n`，macOS/Linux bash 无此问题但保持统一写法）：
    ```bash
    LARK_CLI_NO_PROXY=1 lark-cli im +messages-send --as bot \
      --chat-id <chat_id> \
@@ -26,11 +26,22 @@ Steps:
      --msg-type text \
      --content '{"text":"cc-bot v{version} 已下线\n\nBot 进入休眠，群消息将不再响应"}'
    ```
-7. Verify no residual `poll.js` process matches the project:
+7. Verify no residual `poll.js` process matches the project — **按平台选命令**：
+
+   **Windows**（Git Bash）：
    ```bash
    PIDS=$(powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { \$PSItem.CommandLine -like '*runtime/poll.js*--project*<project.root>*' } | Select-Object -ExpandProperty ProcessId")
    for p in $PIDS; do taskkill //F //PID $p; done
    ```
+
+   **macOS / Linux**（bash / zsh）：
+   ```bash
+   pgrep -f "runtime/poll\.js .*--project .*<project.root>" | xargs -r kill -TERM
+   # 若 2 秒后仍存活，强制 kill -9
+   sleep 2 && pgrep -f "runtime/poll\.js .*--project .*<project.root>" | xargs -r kill -9
+   ```
+
+   平台判定：CC 主会话先查 `process.platform`（`win32` → Windows 分支；`darwin`/`linux` → Unix 分支）。
 8. Remove `.cc-bot/runtime/poll.pid` if present.
 
 Report completion to the user in the main session.

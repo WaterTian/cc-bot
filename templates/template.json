@@ -6,9 +6,10 @@
   "description": "项目一句话描述（可选）",
 
   "im": {
-    "_comment": "type 决定用哪个 adapter。目前支持：lark。后续可扩展 wecom / dingtalk / slack。",
+    "_comment": "type 决定用哪个 adapter。目前支持：lark。后续可扩展 wecom / dingtalk / slack。bot_open_id 选填：配了能精准识别「@bot 自己」的消息；未配时保守模式 — 群里任何 @ 都不响应（包括 @ bot 自己），适合「@他人不搭理」的纯降噪诉求。",
     "type": "lark",
     "bot_app_id": "cli_xxxxxxxxxxxx",
+    "bot_open_id": "",
     "chat_id": "oc_xxxxxxxxxxxx",
     "chat_name": "飞书群名称"
   },

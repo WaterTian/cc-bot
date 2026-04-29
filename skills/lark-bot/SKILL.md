@@ -62,6 +62,23 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
 2. **stdout EPIPE 容错自杀** — 单轮 `process.stdout.writable=false` 或 `stdout.on('error', EPIPE)` 时计数 `epipeStreak++` + skip 当轮 tick（**不立即退出**）；连续 3 轮（~90s）都不可写才 `exit 1`，退出前 `events.log` 写 `BOT_ERROR|poll.js|stdout-*-streak-3|...` 留诊断。瞬断不死、真断才死，避免 Monitor 管道抖动导致 bot 静默死亡
 3. **state 未来值防御** — `last_processed_time > Date.now()+60s` 自愈降到 `now-60s`，emit `BOT_ERROR|poll.js|state-future-timestamp|...`
 
+### @他人消息过滤（v0.1.10+）
+
+群里有多人时，成员间 @ 来 @ 去与 bot 无关，不应打扰主会话。poll.js 在 emit 前判定：
+
+| 消息 mentions 字段 | profile.im.bot_open_id 配了 | 行为 |
+|---|---|---|
+| 空 / 不存在 | — | 正常 emit |
+| 非空，含 bot_open_id | ✅ | 正常 emit（@ bot 自己） |
+| 非空，不含 bot_open_id | ✅ | skip emit + append emitted（@ 他人） |
+| 非空 | ❌ 未配 | **保守模式**：一律 skip + append emitted（含 @ bot 也忽略） |
+
+**保守模式**：未配 `im.bot_open_id` 时，群里任何 @ 一律不响应。这符合"@他人不搭理"的纯降噪诉求；副作用是 @ bot 也会被忽略，用户用自然语言无 @ 即可触发 bot。
+
+**精准模式**：在 `.cc-bot/profiles/active.json` 的 `im.bot_open_id` 填 bot 应用的 open_id（`ou_xxx` 形式），可从 bot 发过的消息 sender.id 反查，或飞书开放平台「应用信息」页查看。
+
+被过滤的消息直接进 `poll.emitted` 视为已处理，不会跨 tick 重判。
+
 ### 启动流程（为低延迟设计：单批次并行 + 跳过冗余检查）
 
 收到启动指令（slash `/cc-bot:start` 或主会话自然语言「开bot」等）时，目标是**从指令到群收到上线通知 ≤ 5s**。方法是把几乎所有动作塞进**一个响应里并行发起**。
@@ -94,7 +111,7 @@ Read profile  ──┐
 
 #### 明确**不做**的事
 
-- ❌ **不清孤儿进程** — poll.js 的 PID lockfile（三层防御①）启动时自检活进程即 `exit 0`，无需主会话跑 `powershell Get-CimInstance`（慢 2-5s）
+- ❌ **不清孤儿进程** — poll.js 的 PID lockfile（三层防御①）启动时自检活进程即 `exit 0`，无需主会话跑 `powershell Get-CimInstance`（Windows）/ `pgrep -f` + `kill`（macOS/Linux）这种慢 2-5s 的全局扫描
 - ❌ **不跑 `TaskOutput` 验证 running 状态** — Monitor 启动无 error 即视为成功；若 poll.js 内部报错，下一轮轮询它会 emit `BOT_ERROR|poll.js|...` 到 Monitor stdout
 - ❌ **不做冗余自检**（lark-cli --version / 路径存在性等）— setup 已验过，真失败时下游第一次 lark-cli 调用会报
 
@@ -109,7 +126,9 @@ Read profile  ──┐
 1. 读 state.json 的 `monitor_task_id`，`TaskStop(task_id)` 停 Monitor；poll.js 收到 SIGTERM 后 releaseLock 清 `poll.pid`
 2. Edit state.json 设 `paused: true`，清 `monitor_task_id`
 3. 发下线通知
-4. 验证 `tasklist //FI "imagename eq node.exe"` 里不再有 poll.js 进程；若有残留，`taskkill //F //PID $(cat .cc-bot/runtime/poll.pid) 2>/dev/null; rm -f .cc-bot/runtime/poll.pid`
+4. 验证无残留 poll.js 进程，按平台选命令：
+   - **Windows**（Git Bash）：`tasklist //FI "imagename eq node.exe"` 看是否仍有 poll.js；若有，`taskkill //F //PID $(cat .cc-bot/runtime/poll.pid) 2>/dev/null; rm -f .cc-bot/runtime/poll.pid`
+   - **macOS / Linux**：`pgrep -f 'runtime/poll\.js .*--project'` 看是否仍有；若有，`kill -TERM $(cat .cc-bot/runtime/poll.pid) 2>/dev/null; sleep 2; kill -9 $(cat .cc-bot/runtime/poll.pid) 2>/dev/null; rm -f .cc-bot/runtime/poll.pid`
 
 ### 开关通知
 
@@ -712,12 +731,14 @@ lark-cli im +messages-resources-download --as bot \
 
 下载完立即 `Read <绝对路径>`（Read 接受绝对路径），结合文字理解意图后回复。多图依次 download + Read 再综合判断。
 
-### Shell 安全规范（Windows Git Bash）
+### Shell 安全规范
+
+> 跨平台统一写法。下面标注 ⚠️Win 的坑仅在 Windows Git Bash 上出现，macOS/Linux 系统 bash 无此问题；但为统一规范，所有平台都按下面规则写。
 
 **禁止：**
-- `$'...'` 语法 — Windows bash 支持不稳定，`$'\n'` 会泄漏为字面 `\n` 文本（已实测翻车：上线通知群里显示 `cc-bot 已上线\n模型: ...`）
-- 单引号内嵌中文或特殊字符 — 终端编码不一致
-- `--text "...\n..."` 内嵌 `\n` 转义符 — 不被解为真换行，落群里是字面 `\n`（多行走下方 JSON content 或双引号 + 字面换行）
+- `$'...'` 语法 ⚠️Win — Windows Git Bash 支持不稳定，`$'\n'` 会泄漏为字面 `\n` 文本（已实测翻车：上线通知群里显示 `cc-bot 已上线\n模型: ...`）。macOS/Linux bash 原生支持，但保持规范一致用 JSON content 替代
+- 单引号内嵌中文或特殊字符 ⚠️Win — Windows 终端编码不一致
+- `--text "...\n..."` 内嵌 `\n` 转义符 ⚠️Win — Windows 下不被解为真换行，落群里是字面 `\n`（多行走下方 JSON content 或双引号 + 字面换行）
 
 **多行消息必须用 JSON content：**
 ```bash
