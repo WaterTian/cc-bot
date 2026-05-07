@@ -54,13 +54,14 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
 
 **为什么走 HTTP 短连接**：`lark-cli event +subscribe` 的 WebSocket 长连接在 Clash/Verge 等 vpn 代理下被静默断流，`LARK_CLI_NO_PROXY=1` 对 WS 客户端无效。HTTP 短连接走代理稳定。
 
-### poll.js 三层防御（禁止删除）
+### poll.js 四层防御（禁止删除）
 
-应对 2026-04-20 polling 架构三坑：
+应对 2026-04-20 polling 架构三坑 + 2026-05-07 v0.1.11 父进程崩溃自愈：
 
 1. **PID lockfile 单例锁** — 启动写 `.cc-bot/runtime/poll.pid`，若已有活进程则 `exit 0`；每 tick `verifyLock()` 校验 pid 仍是自己，被抢则自杀
 2. **stdout EPIPE 容错自杀** — 单轮 `process.stdout.writable=false` 或 `stdout.on('error', EPIPE)` 时计数 `epipeStreak++` + skip 当轮 tick（**不立即退出**）；连续 3 轮（~90s）都不可写才 `exit 1`，退出前 `events.log` 写 `BOT_ERROR|poll.js|stdout-*-streak-3|...` 留诊断。瞬断不死、真断才死，避免 Monitor 管道抖动导致 bot 静默死亡
 3. **state 未来值防御** — `last_processed_time > Date.now()+60s` 自愈降到 `now-60s`，emit `BOT_ERROR|poll.js|state-future-timestamp|...`
+4. **父进程死亡自杀（v0.1.11+）** — 启动记 `ORIGINAL_PPID = process.ppid`；每 tick `checkParentAlive()` 探活，POSIX 走 `process.ppid !== ORIGINAL_PPID`（父死后被 init/launchd 接管 ppid 变 1，零 syscall），Windows 走 `process.kill(ORIGINAL_PPID, 0)` + try/catch ESRCH。父进程死则 `events.log` 写 `BOT_INFO|poll.js|parent-X-died|self-kill` + releaseLock + `exit 0`。应对 CC 整体崩溃后 poll.js 变孤儿持锁、新 start 撞 lockfile 拒启的场景
 
 ### @他人消息过滤（v0.1.10+）
 
@@ -111,7 +112,7 @@ Read profile  ──┐
 
 #### 明确**不做**的事
 
-- ❌ **不清孤儿进程** — poll.js 的 PID lockfile（三层防御①）启动时自检活进程即 `exit 0`，无需主会话跑 `powershell Get-CimInstance`（Windows）/ `pgrep -f` + `kill`（macOS/Linux）这种慢 2-5s 的全局扫描
+- ❌ **不清孤儿进程** — poll.js 的 PID lockfile（四层防御①）+ 父进程死亡自杀（防御 ④，v0.1.11+）双重兜底：启动时撞活进程即 `exit 0`，CC 崩了之前残留的孤儿在 30s 内自检父死即自杀，无需主会话跑 `powershell Get-CimInstance`（Windows）/ `pgrep -f` + `kill`（macOS/Linux）这种慢 2-5s 的全局扫描
 - ❌ **不跑 `TaskOutput` 验证 running 状态** — Monitor 启动无 error 即视为成功；若 poll.js 内部报错，下一轮轮询它会 emit `BOT_ERROR|poll.js|...` 到 Monitor stdout
 - ❌ **不做冗余自检**（lark-cli --version / 路径存在性等）— setup 已验过，真失败时下游第一次 lark-cli 调用会报
 
@@ -163,7 +164,6 @@ Bot 进入休眠，群消息将不再响应
 | `.cc-bot/runtime/state.json` | 运行时状态（paused / last_processed_time / pending_confirm / monitor_task_id） |
 | `.cc-bot/runtime/poll.pid` | poll.js 单例锁 pid 文件（启动时写入，退出时清理） |
 | `.cc-bot/runtime/poll.emitted` | 已推送 message_id 去重表（最近 200 条） |
-| `.cc-bot/runtime/member-cache.json` | 成员缓存（open_id → `{name, role}`） |
 | `.cc-bot/runtime/hud-stdin.json` | HUD 数据（cc-hud 写入） |
 | `.cc-bot/runtime/agents.json` | 多 agent 调度 registry（running / queue；启动时空态，详见 §消息调度） |
 | `.cc-bot/runtime/main-busy.lock` | 主会话忙碌锁（CC UserPromptSubmit 写 / Stop 删；poll.js 读；10min 过期自动清，详见 §主会话优先级） |
@@ -172,30 +172,29 @@ Bot 进入休眠，群消息将不再响应
 
 ## 角色与权限
 
-### 成员缓存（member-cache.json）
+### 角色判定（白名单单源）
 
-**单一事实源：** `.cc-bot/runtime/member-cache.json`（open_id → `{name, role}`）。角色判定和称呼展示都从这里查。
+**单一事实源：** `profile.members.admin_open_ids` 白名单。
 
-**处理消息 SOP：**
-
-1. 每条 NEW_MSG 先用 sender 的 open_id 查缓存
-2. 命中 → 直接用 `name` + `role`
-3. miss → 执行 `lark-cli contact +get-user --as user --user-id <open_id>`，拿到 `name` 立刻 Edit 写回缓存（role 默认 `member`；若 open_id 在 `profile.members.admin_open_ids` 里，role 标 `admin`）
-4. 回复用 `name` 称呼，不要用"群成员"、"某位用户"这种模糊指代
-
-**admin 判定：** `role=admin` 必须满足 open_id 同时在 `profile.members.admin_open_ids` 白名单里。缓存为空时新消息按 `role=member` 处理，直到 admin 白名单确认后升级。
-
-回复群消息时用 `member-cache.json` 里的真实 `name` 称呼对方（产品体验例外，不算泄露）。
-
-**格式示例**（真名用角色占位；setup 后默认只一条 admin）：
-
-```json
-{
-  "ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": { "name": "张开发", "role": "admin" },
-  "ou_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy": { "name": "李项目", "role": "admin" },
-  "ou_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz": { "name": "王测试", "role": "member" }
-}
 ```
+sender open_id ∈ admin_open_ids → admin
+否则                           → member
+```
+
+无运行时 cache、无回填、无双重门槛。新消息直接查白名单一行得出 role。
+
+### 群里称呼
+
+**回复时不具名，依赖 reply 引用上下文。** 飞书 `+messages-reply` 自带原消息引用，群里看得见 sender，bot 不需要复述。
+
+```
+> [李项目 14:20] 19 是啥任务
+> [bot reply 14:21] 19 是盲盒 banner 联调任务
+```
+
+而不是「李项目，19 是…」具名重复。
+
+主动发起（非 reply）的通知改用 `@all` 或不 @ 任何人；个人 @ 通知必要时用 mention 语法直接 @ open_id（不需要 name）。
 
 ### 权限矩阵（按 intent 类别，具体键由 profile.intents 自定义）
 
@@ -211,7 +210,7 @@ Bot 进入休眠，群消息将不再响应
 **权限档位含义：**
 
 - `public` — 所有人可用，无需确认
-- `admin-auto` — 仅 `role=admin`，自动执行（跳过 `pending_confirm`），执行前回一句纯文本占位，完工反馈结果
+- `admin-auto` — 仅 admin（open_id 在 `profile.members.admin_open_ids` 白名单），自动执行（跳过 `pending_confirm`），执行前回一句纯文本占位，完工反馈结果
 - `admin-confirm` — 即使 admin 也需口头确认一次
 - `member` 触发 `admin-*` 操作一律拒绝，回"该操作需管理员授权"
 
@@ -320,7 +319,7 @@ profile 未定义的意图 → 回"当前项目未配置该操作，请检查 pr
 
 0. **fetch 核对**（见上，最高优先级 2）
 1. **解析**：从 `|` 分隔字符串提取字段
-2. **角色判定**：查 member-cache.json，miss 则 `contact +get-user` 回填（admin 要和 profile.members.admin_open_ids 对齐）
+2. **角色判定**：sender open_id ∈ `profile.members.admin_open_ids` → admin，否则 → member（白名单单源，无 cache）
 3. **待确认检查**：读 state.json 的 `pending_confirm`（未超时）：
    - "Y"/"y"/"是"/"确认" → 执行
    - 其他 → 取消
@@ -332,7 +331,7 @@ profile 未定义的意图 → 回"当前项目未配置该操作，请检查 pr
    - admin 触发危险操作 → 直接执行，不写 `pending_confirm`
    - member 触发"仅管理员"操作 → 拒绝
    - 其他危险操作的非 admin → 写 `pending_confirm`（15 min 超时）
-   - `lark-cli im +messages-reply --as bot --message-id <msg_id>` 回复（用 `{name}` 称呼）
+   - `lark-cli im +messages-reply --as bot --message-id <msg_id>` 回复（依赖 reply 引用上下文，正文不具名 — 见 §角色与权限 §群里称呼）
 8. **推进 state.json**：Edit `last_processed_time = time`（`time` = NEW_MSG 末段的 `createTimeMs` 毫秒戳，见 §最高优先级规则 1 格式规范）
 
 ### Bug 报告处理节奏（多 bug 密集会话）
@@ -614,7 +613,7 @@ Bot 长跑时，主上下文每省一点，长期累积明显。**即便还在 <
 
 - `git add` 指定文件，不要 `-A` / `.`（防止误提 .cc-bot/bot_temp、.secret.json 等）
 - commit message：`fix:` / `feat:` / `refactor:` / `chore:` + 一句话主旨 + 空行 + 列出改动项
-- 工程改动（SKILL / member-cache / poll.js / adapter 等）可合进 fix/feat commit，但不上群
+- 工程改动（SKILL / poll.js / adapter 等）可合进 fix/feat commit，但不上群
 - push 失败不重试，发群"push 失败：{错误}，需要你检查网络/凭据"
 
 ## 回复格式
@@ -652,9 +651,9 @@ Bot 长跑时，主上下文每省一点，长期累积明显。**即便还在 <
 
 ### 工程性改动不发群（重要）
 
-**SKILL.md / 成员缓存 / 监听规则 / bot 自身行为调整 / profile 改动等工程改动，不发群通知。只有业务产出（bug 修复、功能上线、新二维码、提审版本）才发群。**
+**SKILL.md / 监听规则 / bot 自身行为调整 / profile 改动等工程改动，不发群通知。只有业务产出（bug 修复、功能上线、新二维码、提审版本）才发群。**
 
-反例：修复 bot skill、调整占位规则、更新 member-cache、切换 profile 的"已完成"消息都不发群。开发人员在主会话直接确认即可。
+反例：修复 bot skill、调整占位规则、切换 profile 的"已完成"消息都不发群。开发人员在主会话直接确认即可。
 
 ### 状态提醒（占位回复）
 

@@ -183,7 +183,7 @@ Setup prints a version banner on start (`cc-bot v<X.Y.Z> setup — <project>`, s
 2. **OAuth login** — guide you through Lark Open Platform app creation (scope checklist provided), then browser Device Flow login
 3. **Pick target chat** — list bot's chats via `AskUserQuestion` card; or one-click create a new chat (bot auto-joins, you become owner)
 4. **Auto-detect IDs** — `bot_app_id` / `admin_open_id` pulled from `lark-cli auth list`, zero manual entry
-5. **Write config** — generate `.cc-bot/profiles/active.json` + `state.json` + pre-filled `member-cache.json` + `.gitignore`
+5. **Write config** — generate `.cc-bot/profiles/active.json` + `state.json` + `.gitignore`
 6. **Register statusline shim** — tees stdin JSON to `hud-stdin.json` (for bot's HUD intent) + cc-hud rendering (if installed, for status bar)
 7. **Register Monitor permission** (v0.1.3+) — append a wildcard rule to `<project>/.claude/settings.local.json`, so cc-bot version upgrades never re-prompt for Monitor launch permission
 
@@ -267,7 +267,7 @@ Works for **any project type** — Web / mini-program / Node service / Python da
 2. **OAuth 登录引导** — 带你去飞书开放平台建应用（附必需 scope 清单），完成浏览器 Device Flow 登录
 3. **选目标群** — 用 `AskUserQuestion` 卡片列 bot 所在群，或一键新建（bot 自动入群、你成为群主）
 4. **自动探测 ID** — `bot_app_id` / `admin_open_id` 从 `lark-cli auth list` 直接取，不用手填
-5. **写配置** — 生成 `.cc-bot/profiles/active.json` + `state.json` + 预填 `member-cache.json` + `.gitignore`
+5. **写配置** — 生成 `.cc-bot/profiles/active.json` + `state.json` + `.gitignore`
 6. **注册 statusline shim** — 落盘 stdin JSON（给 bot 用）+ 可选透传 cc-hud（渲染状态栏）
 7. **注册 Monitor 通配权限**（v0.1.3+）— 向 `<project>/.claude/settings.local.json` append 通配规则，cc-bot 版本升级不再弹 Monitor 启动权限询问
 

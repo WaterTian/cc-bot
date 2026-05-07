@@ -197,7 +197,7 @@ AskUserQuestion({
 
 ## Stage E — 写配置
 
-Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提升速度。Step 7（改 `~/.claude/settings.json`）独立，放并行之后。
+Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提升速度。Step 6（改 `~/.claude/settings.json`）独立，放并行之后。
 
 1. Create directories: `./.cc-bot/profiles/` and `./.cc-bot/runtime/`. Create empty `./.cc-bot/runtime/.gitkeep`.
 2. Read the plugin-level template `${CLAUDE_PLUGIN_ROOT}/templates/template.json`.
@@ -219,13 +219,7 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
    {"last_processed_time":"<current-unix-ms>","pending_confirm":null,"paused":true,"monitor_task_id":null}
    ```
    Use `Date.now()` (JS) or `date +%s%3N` (bash) to get the value.
-6. **Pre-fill `./.cc-bot/runtime/member-cache.json`** with the admin entry from Stage B. This saves the bot one `lark-cli contact +get-user` call on the first group message:
-   ```json
-   {
-     "<ADMIN_OPEN_ID>": { "name": "<ADMIN_NAME>", "role": "admin" }
-   }
-   ```
-7. Append to `./.gitignore` (create if missing, skip rules that already exist):
+6. Append to `./.gitignore` (create if missing, skip rules that already exist):
    ```
    # cc-bot
    .cc-bot/runtime/*
@@ -233,7 +227,7 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
    .cc-bot/bot_temp/
    .cc-bot/profiles/active.json
    ```
-8. **注册 cc-bot statusline shim** — 改 `~/.claude/settings.json` 的 `statusLine.command` 指向 cc-bot 的 shim 脚本。这个 shim 每 tick 会：(a) 把 CC 注入的 stdin JSON 落盘到 `.cc-bot/runtime/hud-stdin.json` 供 bot 读取；(b) 若装了 cc-hud 则透传 stdin 并输出 cc-hud 渲染的状态栏内容（状态栏 + HUD 双得，互不冲突）。
+7. **注册 cc-bot statusline shim** — 改 `~/.claude/settings.json` 的 `statusLine.command` 指向 cc-bot 的 shim 脚本。这个 shim 每 tick 会：(a) 把 CC 注入的 stdin JSON 落盘到 `.cc-bot/runtime/hud-stdin.json` 供 bot 读取；(b) 若装了 cc-hud 则透传 stdin 并输出 cc-hud 渲染的状态栏内容（状态栏 + HUD 双得，互不冲突）。
 
    a. Read `~/.claude/settings.json`（用户全局；可能不存在）。若文件缺失，直接以 `{}` 为初值。
 
@@ -279,11 +273,11 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
 
    e. Tell user: `✓ statusline shim 已注册到 ~/.claude/settings.json（下次 CC 重启生效；或立即重新打开会话）`
 
-9. **注册 main-busy hook**（v0.1.6+）—— 让 `~/.claude/settings.json` 的 `hooks.UserPromptSubmit` / `hooks.Stop` 调用 cc-bot 的 main-busy 脚本，实现"主窗口对话优先、群消息让路"。
+8. **注册 main-busy hook**（v0.1.6+）—— 让 `~/.claude/settings.json` 的 `hooks.UserPromptSubmit` / `hooks.Stop` 调用 cc-bot 的 main-busy 脚本，实现"主窗口对话优先、群消息让路"。
 
    **为什么走用户全局 settings.json 而非 plugin `hooks.json`**：CC 已知 bug #10225 — plugin 声明的 UserPromptSubmit hook 完全不 fire。`main-busy.js` 自带"非 cc-bot 项目 silent skip"（检查 `.cc-bot/` 是否存在），全局注册对其他项目无副作用。
    
-   a. Read `~/.claude/settings.json`（沿用 step 8 同一个文件）。缺失则以 `{}` 为初值。确保 `hooks` 是对象（`typeof hooks === 'object' && !Array.isArray(hooks)`），不是则跳过本步报警「settings.json 的 hooks 字段类型异常」（不强写覆盖）。
+   a. Read `~/.claude/settings.json`（沿用 step 7 同一个文件）。缺失则以 `{}` 为初值。确保 `hooks` 是对象（`typeof hooks === 'object' && !Array.isArray(hooks)`），不是则跳过本步报警「settings.json 的 hooks 字段类型异常」（不强写覆盖）。
    
    b. 目标 hook 配置（两条都要有）：
       ```json
@@ -320,7 +314,7 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
       - 路径刷新（旧 main-busy 命令被替换）→ `✓ main-busy hook 路径已刷新（旧：{old} → 新：{current}）`
       - 新增但保留了其他 hook → `✓ 已追加 main-busy hook（保留你现有的其他 {event} hook）`
 
-10. **注册 Monitor 通配权限**到 `<project>/.claude/settings.local.json`，让 cc-bot 版本升级后不再被 CC 反复询问权限。
+9. **注册 Monitor 通配权限**到 `<project>/.claude/settings.local.json`，让 cc-bot 版本升级后不再被 CC 反复询问权限。
 
    a. Read `<project>/.claude/settings.local.json`。文件缺失 → 初值 `{}`；解析失败 → 直接报错「settings.local.json 格式错误，请先修复」并跳过本步（不能强写覆盖用户数据）。
 
@@ -341,13 +335,13 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
       - 幂等跳过 → `✓ Monitor 通配权限已就位（跳过）`
       - 发现硬编码僵尸 → `⚠ 检测到 N 条硬编码版本路径的旧权限规则（位置 .claude/settings.local.json）。建议手工替换为通配（按当前平台模板）。`
 
-11. **检测 cc-hud 安装状态**（决定完成提示里附加哪段 hint）：
+10. **检测 cc-hud 安装状态**（决定完成提示里附加哪段 hint）：
    ```bash
    grep -q '"cc-hud@' ~/.claude/plugins/installed_plugins.json 2>/dev/null && echo installed || echo not_installed
    ```
    设 **HUD_STATE** = `installed` 或 `not_installed`。
 
-12. Tell user（根据 HUD_STATE 拼出对应 hint）：
+11. Tell user（根据 HUD_STATE 拼出对应 hint）：
 
    共通部分：
    ```
@@ -382,9 +376,8 @@ Steps 1-6 可以并行执行（读 template + 4 次 Write + 1 次 mkdir），提
 - **Stage A** 已装 → 直接到 B
 - **Stage B** `auth list` 非空 → 取出 BOT_APP_ID / ADMIN_OPEN_ID / ADMIN_NAME 直接到 Stage D
 - **Stage E** `active.json` 存在且字段非占位符（`im.bot_app_id` 匹配 `/^cli_[a-z0-9]+$/` 且**不是** `cli_xxxxxxxxxxxx` 示例；`im.chat_id` 以 `oc_` 开头且长度 > 20）→ 输出「已配置，可 /cc-bot:start」。**仍需复查**：
-  - 若 `settings.json` 的 `statusLine.command` 未指向 cc-bot shim → 跑步骤 8 补注册（幂等，可重复）
-  - 若 `settings.json` 的 `hooks.UserPromptSubmit` / `hooks.Stop` 无 cc-bot main-busy 命令 → 跑步骤 9 补注册（幂等）
-  - 若 `.cc-bot/runtime/member-cache.json` 缺失 → 跑步骤 6 补写入
-  - 若 `.claude/settings.local.json` 无 Monitor 通配权限规则 → 跑步骤 10 补注册（幂等）
+  - 若 `settings.json` 的 `statusLine.command` 未指向 cc-bot shim → 跑步骤 7 补注册（幂等，可重复）
+  - 若 `settings.json` 的 `hooks.UserPromptSubmit` / `hooks.Stop` 无 cc-bot main-busy 命令 → 跑步骤 8 补注册（幂等）
+  - 若 `.claude/settings.local.json` 无 Monitor 通配权限规则 → 跑步骤 9 补注册（幂等）
 
 用户任何阶段失败后修好，再发 `/cc-bot:setup` 会自动从断点续跑。
