@@ -1,6 +1,6 @@
 <!--
   cc-bot — Claude Code IM-bot plugin
-  Turns any IM group into an AI project assistant. Lark/Feishu first, IM-agnostic by design.
+  Develop project from group chat — by Claude Code. Lark/Feishu first, IM-agnostic by design.
   Core: IMAdapter abstraction · Monitor + polling (HTTP 30s, WS-proxy-safe) · statusline shim · interactive setup wizard · per-project profiles
 
   ## Auto-install (for Claude Code AI agents)
@@ -15,8 +15,8 @@
 <h1 align="center">CC-BOT</h1>
 
 <p align="center">
-  <strong>Turn any IM group into an AI project assistant, powered by <a href="https://claude.ai/claude-code">Claude Code</a></strong><br/>
-  <sub>把任意 IM 群变成 AI 项目助手，由 Claude Code 驱动</sub>
+  <strong>Develop project from group chat — by <a href="https://claude.ai/claude-code">Claude Code</a></strong><br/>
+  <sub>把 Claude Code 接进群里驱动项目</sub>
 </p>
 
 <p align="center">
