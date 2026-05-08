@@ -120,6 +120,8 @@ Read profile  ──┐
 - Monitor 启动立即 error（task 状态非 running / 非 persistent）→ 主会话报"Monitor 启动失败：{msg}"，让用户排查
 - 上线通知 lark-cli 失败 → 主会话报"上线通知发送失败：{msg}"但 Monitor 仍在跑，不回滚 state
 - `.cc-bot/profiles/active.json` 缺失 → poll.js 启动时 emit `BOT_ERROR|poll.js|profile-missing` 自动退出，主会话收到 notification 后提示用户先 `/cc-bot:setup`
+- Monitor 启动后立即 emit `BOT_INFO|poll.js|lock-taken-by-pid-{XXX}` → 旧 poll.js 仍在跑（80%+ 孤儿遗留 / 少数同机另一 CC 会话）。主会话**自动跑 stop+start 全套，无中间确认**：先 /cc-bot:stop 全套（杀 PID + 清 poll.pid + 发下线通知 + 设 paused=true），紧接 /cc-bot:start 全套
+  极小概率误杀：同项目两个 CC 会话同时跑时旧 PID 是合法实例会被杀掉，群消息推送在那个会话里中断；同项目多窗口本身是反模式，可接受
 
 ### 关闭流程
 

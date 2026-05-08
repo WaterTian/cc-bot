@@ -4,6 +4,14 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.11] - 2026-05-08
+
+- feat: v0.1.11 候选 — check-image-size 防 dimension_limit + BUSY 池 14→30 + Defense ④ 撤回
+- feat: 砍 member-cache.json 单源化 admin 判定 + poll.js Defense ④ 父进程死亡自杀
+- chore: scripts/release.js 加 --release 标志一键建 GitHub Release
+- docs: gitignore FEEDBACK.md + 详化 v0.1.10 changelog 标注 Mac 实验性
+- docs: SKILL §异常路径 — lock-taken 自动 stop+start，去掉 AskUserQuestion 卡片
+
 ## [0.1.10] - 2026-04-29
 
 - feat: @他人不搭理 — poll.js 加 mention filter，群里 @ 他人的消息默认不响应（多人协作群降噪）；profile 新增 `im.bot_open_id` 选填字段，配后精准识别"@bot 自己"，未配则保守模式（任何 @ 一律 skip，包括 @ bot — 用自然语言无 @ 即可触发）
