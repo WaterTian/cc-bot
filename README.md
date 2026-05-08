@@ -16,7 +16,7 @@
 
 <p align="center">
   <strong>Develop project from group chat — by <a href="https://claude.ai/claude-code">Claude Code</a></strong><br/>
-  <sub>把 Claude Code 接进群里驱动项目</sub>
+  <sub>接 AI 进群里开发项目</sub>
 </p>
 
 <p align="center">

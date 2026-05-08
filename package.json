@@ -1,7 +1,7 @@
 {
   "name": "cc-bot",
   "version": "0.1.11",
-  "description": "把 Claude Code 接进群里驱动项目 — 飞书（Lark）",
+  "description": "接 AI 进群里开发项目 — 飞书（Lark）",
   "engines": {
     "node": ">=18.0.0"
   },
