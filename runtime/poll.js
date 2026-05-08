@@ -15,13 +15,16 @@
 //     "polling_interval_ms": 30000   // 可选
 //   }
 //
-// 四层防御（2026-04-20 polling 架构三坑对策 + 2026-05-07 v0.1.11 父进程崩溃自愈，不可删除）：
+// 三层防御（2026-04-20 polling 架构三坑对策，不可删除）：
 //   ① PID lockfile 单例锁 — 启动旧进程活则 exit 0；每 tick 校验 pid 文件仍是自己
 //   ② stdout EPIPE 容错自杀 — 单轮不可写 skip 当轮，连续 3 轮（~90s）才 exit 防污染 poll.emitted；
 //      退出前写 events.log 留诊断痕迹（瞬断不死，真断才死）
 //   ③ state.last_processed_time 未来值防御 — 超 now+60s 自愈 + emit BOT_ERROR
-//   ④ 父进程死亡自杀（v0.1.11+）— CC 整体崩溃后 poll.js 不再变孤儿持锁；POSIX 走 process.ppid !== ORIGINAL，
-//      Windows 走 process.kill(ppid, 0) 探活；命中即 events.log 留痕 + releaseLock + exit 0
+//
+// 注：v0.1.11 试过 Defense ④ 父进程死亡自杀（ppid 重读 / process.kill(pid,0) 探活），但 cc-bot-test
+// Windows 实测发现进程链 CC → bash → poll.js 中 CC 死后 bash 孤儿不死，poll.js.ppid（=bash PID）不变
+// → 检测失效；POSIX 推测同因（bash 被 init/launchd 接管但仍活）。撤回，待跨平台反向追溯 CC PID 方案
+// 成熟再补（v0.1.12+ 候选）。CC 崩溃场景由 ② EPIPE 90s 兜底（实战验证稳）。
 
 const fs = require('fs')
 const path = require('path')
@@ -110,8 +113,24 @@ const BUSY_PLACEHOLDERS = [
   '🐢 我手慢，请多担待',
   '🧩 拼图差一块，马上好',
   '🔭 对焦中，别急..',
-  '📮 消息已签收，稍候奉上',
-  '🎮 在打个小 boss..马上回',
+  '📮 消息已签收.',
+  '🎮 在打个小 boss..',
+  '🐛 在抓 bug..',
+  '🔨 锤代码呢',
+  '📚 等等...',
+  '💾 读档中，马上',
+  '⚙️ 齿轮转着呢',
+  '🛠️ 工具箱翻找中',
+  '🥱 脑子慢，多包涵',
+  '🙃 卡壳了，给点时间',
+  '🐌 蜗牛速度，但在前进',
+  '🤹 多线程杂耍中',
+  '😵‍💫 大脑过载..',
+  '🪄 咒语念到一半',
+  '🎩 召唤代码精灵中',
+  '🔄 转圈圈中，别走开',
+  '📶 信号微弱，努力中',
+  '🍜 泡面三分钟',
 ]
 function pickBusyPlaceholder() {
   return BUSY_PLACEHOLDERS[Math.floor(Math.random() * BUSY_PLACEHOLDERS.length)]
@@ -220,29 +239,6 @@ function guardFutureTime(state) {
   return state
 }
 
-// ========== Defense 4: 父进程死亡自杀（v0.1.11+） ==========
-// CC 主进程崩溃后，poll.js 走「父死、stdout 描述符仍在」路径变孤儿持锁，新 start 撞 lockfile 拒启。
-// POSIX (linux/darwin)：父死后子进程被 init/launchd 接管，process.ppid 自动变 1，零 syscall 检测。
-// Windows：ppid 不会变 1，需 process.kill(pid, 0) 探活；signal=0 在进程已死时抛 ESRCH（pidAlive 已实现）。
-
-const ORIGINAL_PPID = process.ppid
-
-function isParentAlive() {
-  if (process.platform !== 'win32') {
-    // POSIX: 父死后 ppid 变 1（init/launchd），零开销
-    return process.ppid === ORIGINAL_PPID
-  }
-  return pidAlive(ORIGINAL_PPID)
-}
-
-function checkParentAlive() {
-  if (!isParentAlive()) {
-    logEvent(`BOT_INFO|poll.js|parent-${ORIGINAL_PPID}-died|self-kill`)
-    releaseLock()
-    process.exit(0)
-  }
-}
-
 // ========== 核心轮询逻辑 ==========
 
 function readState() {
@@ -325,8 +321,6 @@ async function sendMainBusyPlaceholder() {
 }
 
 async function tick() {
-  // Defense ④ 优先：不依赖 stdout，POSIX 父死 + stdout 立即断时省 60s（不被 ② 90s streak 抢）
-  checkParentAlive()
   if (!checkStdoutTolerance()) return
   verifyLock()
 

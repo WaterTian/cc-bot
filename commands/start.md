@@ -37,7 +37,7 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
 
 ### 明确不做（精简过的动作，附回滚条件）
 
-- ❌ 不跑 `powershell Get-CimInstance` 清孤儿 — poll.js 的 PID lockfile（四层防御①）+ 父进程死亡自杀（防御 ④，v0.1.11+）双重兜底自己处理
+- ❌ 不跑 `powershell Get-CimInstance` 清孤儿 — poll.js 的 PID lockfile（三层防御①）已兜底：启动时撞活进程即 `exit 0`，撞死 pid 由 `acquireLock()` 覆盖，CC 崩溃后旧 poll.js 由 ② EPIPE 90s 自杀
   - **回滚条件**：若发现同 project 多个 poll.js 同跑 / poll.emitted 重复写 / `BOT_INFO|lock-taken` 频发但老 pid 已死，恢复为 commit `a7f0b4b` 之前版本的 PowerShell 清孤儿步骤
 - ❌ 不跑 `TaskOutput` 验证 running — Monitor 启动无 error 即视为成功
   - **回滚条件**：若 Monitor 启动报成功但群消息长时间无 NEW_MSG 推送（TaskGet 状态异常），加回 `TaskOutput(task_id, block:false)` 验证

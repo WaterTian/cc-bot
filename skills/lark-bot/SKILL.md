@@ -54,14 +54,13 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
 
 **为什么走 HTTP 短连接**：`lark-cli event +subscribe` 的 WebSocket 长连接在 Clash/Verge 等 vpn 代理下被静默断流，`LARK_CLI_NO_PROXY=1` 对 WS 客户端无效。HTTP 短连接走代理稳定。
 
-### poll.js 四层防御（禁止删除）
+### poll.js 三层防御（禁止删除）
 
-应对 2026-04-20 polling 架构三坑 + 2026-05-07 v0.1.11 父进程崩溃自愈：
+应对 2026-04-20 polling 架构三坑：
 
 1. **PID lockfile 单例锁** — 启动写 `.cc-bot/runtime/poll.pid`，若已有活进程则 `exit 0`；每 tick `verifyLock()` 校验 pid 仍是自己，被抢则自杀
 2. **stdout EPIPE 容错自杀** — 单轮 `process.stdout.writable=false` 或 `stdout.on('error', EPIPE)` 时计数 `epipeStreak++` + skip 当轮 tick（**不立即退出**）；连续 3 轮（~90s）都不可写才 `exit 1`，退出前 `events.log` 写 `BOT_ERROR|poll.js|stdout-*-streak-3|...` 留诊断。瞬断不死、真断才死，避免 Monitor 管道抖动导致 bot 静默死亡
 3. **state 未来值防御** — `last_processed_time > Date.now()+60s` 自愈降到 `now-60s`，emit `BOT_ERROR|poll.js|state-future-timestamp|...`
-4. **父进程死亡自杀（v0.1.11+）** — 启动记 `ORIGINAL_PPID = process.ppid`；每 tick `checkParentAlive()` 探活，POSIX 走 `process.ppid !== ORIGINAL_PPID`（父死后被 init/launchd 接管 ppid 变 1，零 syscall），Windows 走 `process.kill(ORIGINAL_PPID, 0)` + try/catch ESRCH。父进程死则 `events.log` 写 `BOT_INFO|poll.js|parent-X-died|self-kill` + releaseLock + `exit 0`。应对 CC 整体崩溃后 poll.js 变孤儿持锁、新 start 撞 lockfile 拒启的场景
 
 ### @他人消息过滤（v0.1.10+）
 
@@ -112,7 +111,7 @@ Read profile  ──┐
 
 #### 明确**不做**的事
 
-- ❌ **不清孤儿进程** — poll.js 的 PID lockfile（四层防御①）+ 父进程死亡自杀（防御 ④，v0.1.11+）双重兜底：启动时撞活进程即 `exit 0`，CC 崩了之前残留的孤儿在 30s 内自检父死即自杀，无需主会话跑 `powershell Get-CimInstance`（Windows）/ `pgrep -f` + `kill`（macOS/Linux）这种慢 2-5s 的全局扫描
+- ❌ **不清孤儿进程** — poll.js 的 PID lockfile（三层防御①）已兜底：启动时撞活进程即 `exit 0`；撞死 pid 文件由 `acquireLock()` 自动覆盖；CC 崩溃后旧 poll.js 由 ② EPIPE 90s 兜底自杀，无需主会话跑 `powershell Get-CimInstance`（Windows）/ `pgrep -f` + `kill`（macOS/Linux）这种慢 2-5s 的全局扫描
 - ❌ **不跑 `TaskOutput` 验证 running 状态** — Monitor 启动无 error 即视为成功；若 poll.js 内部报错，下一轮轮询它会 emit `BOT_ERROR|poll.js|...` 到 Monitor stdout
 - ❌ **不做冗余自检**（lark-cli --version / 路径存在性等）— setup 已验过，真失败时下游第一次 lark-cli 调用会报
 
@@ -533,7 +532,7 @@ subagent 完成时主会话收到自动通知（`run_in_background` 机制）。
 - 实现上**以 CC `UserPromptSubmit` hook fire 为准**（CC 不区分 prompt 来源）—— `/loop` / `ScheduleWakeup` / `CronCreate` / `RemoteTrigger` / `claude -p` / Task/subagent 完成（bug #16952 假 fire）等自动场景也会触发锁，一视同仁
 - Monitor 事件注入（群消息 push 路径）**不走** `UserPromptSubmit`，不会自锁
 
-**这不是 bug，是设计**：主会话是单线程，上述"自动任务"场景下主会话本就被占用，群消息 emit 过去也没法响应。锁只是把"主会话忙没理你"变成群里显式占位（从 14 条文案池随机一条，详见 `runtime/poll.js` `BUSY_PLACEHOLDERS`），体验更好不更差。
+**这不是 bug，是设计**：主会话是单线程，上述"自动任务"场景下主会话本就被占用，群消息 emit 过去也没法响应。锁只是把"主会话忙没理你"变成群里显式占位（从 30 条文案池随机一条，详见 `runtime/poll.js` `BUSY_PLACEHOLDERS`），体验更好不更差。
 
 **机制**（poll.js 层拦截，主会话无感知）：
 
@@ -541,7 +540,7 @@ subagent 完成时主会话收到自动通知（`run_in_background` 机制）。
    - `UserPromptSubmit` → `node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js lock` 写 `.cc-bot/runtime/main-busy.lock`
    - `Stop` → `node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js unlock` 删锁 + 删通知标志
 2. poll.js 每 tick 开头 `checkMainBusy()`：
-   - 锁存在 + 未过期 → **仍 fetch 但不 emit**（消息不进主会话事件队列）；首次见到新消息发群占位（14 条文案池随机一条）+ 写 `main-busy-notified.flag` 同锁周期内静默
+   - 锁存在 + 未过期 → **仍 fetch 但不 emit**（消息不进主会话事件队列）；首次见到新消息发群占位（30 条文案池随机一条）+ 写 `main-busy-notified.flag` 同锁周期内静默
    - 锁存在 + 过期（> 10min）→ 强制删锁 + 写 `events.log` 告警 `BOT_WARN|main-busy-lock-expired|ttl-600000ms`
    - 锁不存在 → 正常 emit NEW_MSG
 3. 主会话响应完（Stop）→ 锁 + flag 同时删 → 下一 tick（≤ 30s）恢复正常 fetch，积压消息通过 `poll.emitted` 去重机制补 emit，不会丢
@@ -728,7 +727,24 @@ lark-cli im +messages-resources-download --as bot \
 - `--type image`（视频 `--type video`，本 bot 不处理）
 - `--output`：相对路径，`./.cc-bot/bot_temp/` 前缀，语义化短名
 
-下载完立即 `Read <绝对路径>`（Read 接受绝对路径），结合文字理解意图后回复。多图依次 download + Read 再综合判断。
+**下载后必须先查尺寸再决定是否 Read**（v0.1.11+，避免 >2000px 图片污染会话历史触发 API dimension limit 整轮 tool 阻塞）：
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/runtime/check-image-size.js <绝对路径>
+```
+
+stdout 单行输出 + exit code：
+
+| 输出前缀 | exit | 动作 |
+|---------|------|------|
+| `OK <w>x<h> <format>` | 0 | 正常 `Read <绝对路径>`，结合文字判意图后回复 |
+| `TOO_LARGE <w>x<h> <format>` | 1 | **禁止 Read**，纯文字回群：`收到截图，但长边 X px 超过 2000px 限制（再大会让我处理出错），麻烦重发一张缩到 2000px 以内的。手机系统截图工具默认输出一般就符合` |
+| `UNKNOWN_FORMAT <reason>` | 2 | 非 PNG/JPEG/GIF（如 WebP/HEIC/AVIF），可谨慎 Read（多数手机相册 WebP 在 ~1500px 内安全） |
+| `ERROR <reason>` | 3 | 工具报错，告诉用户重试一次或换格式重发 |
+
+多图依次 download + check + Read，任一张 TOO_LARGE 都立刻停下回纯文字。
+
+> **为什么必须查尺寸而不是直接 Read**：dimension_limit 是 Claude API 的会话级硬约束 — 一旦把超大图喂进会话历史，**之后每一轮 API 请求带上这段历史都会重复触发该报错**，整轮 tool 全死、bot 沉默，唯一出路是 `/clear` 重开会话。预防成本（一条 ~30ms 的 node 命令）远小于翻车成本（会话作废）。
 
 ### Shell 安全规范
 

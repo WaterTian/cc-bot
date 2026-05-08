@@ -320,13 +320,14 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
 
    b. 确保 `permissions.allow` 是数组（缺失则创建 `permissions: { allow: [] }`）。
 
-   c. 构造通配规则（按 `process.platform` 选模板，仅注册当前平台的模板，避免 settings.local.json 里堆冗余无效规则）：
-      - **Windows**（`win32`）：`Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)`
-      - **macOS**（`darwin`）：`Bash(node /Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)`
-      - **Linux**（`linux`）：`Bash(node /home/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)`
+   c. 构造通配规则（按 `process.platform` 选模板，仅注册当前平台的模板，避免 settings.local.json 里堆冗余无效规则）。v0.1.11+ 通配范围从单一 `poll.js` 扩展到整个 `runtime/*.js`，覆盖 v0.1.11 新增的 `check-image-size.js` 等工具，未来加新工具不再需要改 setup：
+      - **Windows**（`win32`）：`Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)`
+      - **macOS**（`darwin`）：`Bash(node /Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)`
+      - **Linux**（`linux`）：`Bash(node /home/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)`
 
    d. 扫 `permissions.allow[]`：
-      - 若**已有完全相同**的通配规则 → ✓ 幂等跳过
+      - 若**已有完全相同**的通配规则（`runtime/*.js *`）→ ✓ 幂等跳过
+      - 若有 v0.1.3-v0.1.10 老 `runtime/poll.js --project *` 单文件通配规则 → **不自动删**（向下兼容、保留授权历史），但提示"检测到旧 poll.js 单文件通配规则，建议补一条 runtime/*.js 通配（v0.1.11+ 新增 check-image-size.js 等工具会被覆盖）"，并 append 新通配
       - 若有包含 `cache/cc-bot/cc-bot/<具体数字版本号>/runtime/poll.js` 的硬编码规则 → **不自动删**（尊重用户手工授权历史；提示"检测到 X 条硬编码版本路径，建议换为通配"即可。自动清理交给 `/cc-bot:doctor --fix` 未来实现）
       - 否则 → append 通配规则到数组末尾，Write 回去
 

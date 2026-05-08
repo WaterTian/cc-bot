@@ -140,15 +140,17 @@ When a new release is announced, run these in **each project** using cc-bot:
 
 CC's plugin cache is version-indexed (`~/.claude/plugins/cache/cc-bot/cc-bot/<version>/`). After each upgrade the Monitor launch path points to a new version dir, so CC would otherwise re-prompt for permission.
 
-**Since v0.1.3**, `/cc-bot:setup` auto-writes the following wildcard rule to `<project>/.claude/settings.local.json`:
+**Since v0.1.3**, `/cc-bot:setup` auto-writes a wildcard rule to `<project>/.claude/settings.local.json`. **As of v0.1.11** the wildcard covers the entire `runtime/*.js` directory (was just `poll.js`), so future runtime tools (e.g. `check-image-size.js`) no longer require re-running setup:
 
 ```
-Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/poll.js --project *)
+Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)
 ```
 
-You won't be prompted for Monitor on any future version upgrade.
+You won't be prompted for any cc-bot runtime tool on future version upgrades.
 
-**For v0.1.2 or earlier installs** (pre-auto): after you update to v0.1.3+, re-run `/cc-bot:setup` — step 10 is idempotent and will append the rule. Or add it manually.
+**For v0.1.2 or earlier installs** (pre-auto): after you update, re-run `/cc-bot:setup` — step 9 is idempotent and will append the rule. Or add it manually.
+
+**Migrating from v0.1.10 or earlier** (had the older `runtime/poll.js --project *` rule): re-run `/cc-bot:setup` once — it appends the new `runtime/*.js *` wildcard while keeping the old single-file rule intact for backwards compatibility.
 
 **Since v0.1.6** — `/cc-bot:setup` step 9 additionally registers a `UserPromptSubmit` / `Stop` hook pair into `~/.claude/settings.json` so main-window typing automatically pauses group-message handling (poll.js skips emit + sends a one-shot placeholder, randomly picked from a 14-phrase pool since v0.1.9). **After upgrading to v0.1.6 you must re-run `/cc-bot:setup` once** to activate the hook — the three §Updating commands above only pull new code; they don't touch user-global settings.json.
 

@@ -41,7 +41,7 @@ cc-bot/
 - **IM 无关定位**：cc-bot 是 IM 无关的 Claude Code 群 bot 插件，飞书 = 当前默认实现；见 memory `feedback_im_agnostic_design`。
 - **每项目独立 `.cc-bot/`**：使用 cc-bot 的项目在自己根目录下建 `.cc-bot/profiles/` + `.cc-bot/runtime/`，profile 和运行时状态都跟项目走，多项目互不污染。
 - **poll.js 无项目假设**：启动参数 `--project <abs-path>`，所有路径基于此。`${CLAUDE_PLUGIN_ROOT}` 由 Claude Code 在插件安装后注入。
-- **四层防御**（详见 SKILL §poll.js 四层防御）：PID lockfile / stdout EPIPE / state 未来值自愈 / 父进程死亡自杀（v0.1.11+，POSIX `process.ppid` 重读 / Windows `kill(pid, 0)`）。前三条 2026-04-20 polling 架构三坑对策，第四条 2026-05-07 v0.1.11 补 CC 整体崩溃后孤儿持锁场景，不可删。
+- **三层防御**（详见 SKILL §poll.js 三层防御）：PID lockfile / stdout EPIPE / state 未来值自愈。2026-04-20 polling 架构三坑对策，不可删。v0.1.11 试过补第四层（父进程死亡自杀 ppid 重读），cc-bot-test Win 实测发现 bash 中间层导致检测失效已撤回，跨平台反向追溯 CC PID 方案移 v0.1.12+ 候选。
 
 ## 本地开发 / 测试流程
 
