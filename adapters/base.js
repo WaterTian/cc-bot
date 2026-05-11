@@ -48,7 +48,7 @@ class IMAdapter {
   /**
    * 发送纯文本。
    * @param {{chatId: string, text: string, replyTo?: string}} opts
-   *   replyTo: 存在则以回复形式发送（飞书 messages-reply），否则新起一条
+   *   replyTo: 存在则以回复形式发送（飞书=引用框 / Slack=thread_ts）；不传则发到 channel 主流
    * @returns {Promise<{id: string}>}
    */
   async sendText(opts) {
@@ -81,6 +81,28 @@ class IMAdapter {
    */
   async getUser(opts) {
     throw new Error('Not implemented: getUser')
+  }
+
+  /**
+   * Push 模式监听消息（Socket Mode / WebSocket 推送）。仅 push 类 IM 实现，
+   * polling 类 IM（lark）不实现，由 poll.js 走 listRecentMessages 拉取。
+   *
+   * 每收到一条用户消息调一次 onMessage(stdMessage)。adapter 内部负责重连/心跳/
+   * 断流监控，断流且无法自愈时调 onError(err) 让 poll.js 决定退出策略。
+   *
+   * @param {{chatId: string, onMessage: (m: Message) => void, onError?: (e: Error) => void}} opts
+   * @returns {Promise<void>}  返回时表示监听已建立（首次 hello/ack 收到）
+   */
+  async startListening(opts) {
+    throw new Error('Not implemented: startListening (push-mode only)')
+  }
+
+  /**
+   * 停止 push 模式监听。仅 push 类 IM 实现。
+   * @returns {Promise<void>}
+   */
+  async stopListening() {
+    throw new Error('Not implemented: stopListening (push-mode only)')
   }
 }
 

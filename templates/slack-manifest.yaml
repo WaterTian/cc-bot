@@ -1,0 +1,46 @@
+# cc-bot Slack App manifest 模板
+#
+# 用法（配合 /cc-bot:setup 引导，无需手动操作）：
+#   1. 打开 https://api.slack.com/apps
+#   2. 「Create New App」→「From a manifest」
+#   3. 选择 workspace
+#   4. 把本文件**整体内容**粘进 YAML 编辑框
+#   5. 点 Next → Create
+#   6. 在 App 详情页生成 App-Level Token（scope: connections:write）
+#   7. 「Install to Workspace」→ 同意授权 → 复制 Bot User OAuth Token（xoxb-...）
+#   8. 回到 cc-bot setup 向导粘贴两个 token
+
+display_information:
+  name: cc-bot
+  description: Claude Code-powered group project assistant
+  background_color: "#1a1a1a"
+
+features:
+  bot_user:
+    display_name: cc-bot
+    always_online: true
+
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read   # 监听 @cc-bot
+      - channels:history    # 读 public channel 历史（兜底；主路径走 Socket Mode push）
+      - channels:read       # 列 channel
+      - chat:write          # 发消息
+      - files:read          # 下载图片 / 文件
+      - files:write         # 上传图片
+      - groups:history      # 读 private channel 历史
+      - groups:read         # 列 private channel
+      - users:read          # 查用户信息（取代飞书 getUser）
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels    # public channel 新消息
+      - message.groups      # private channel 新消息
+      - app_mention         # @cc-bot
+  interactivity:
+    is_enabled: false       # v1 不做按钮 / 弹窗交互
+  org_deploy_enabled: false
+  socket_mode_enabled: true # 关键：无需公网 webhook（防火墙后也能用）
+  token_rotation_enabled: false

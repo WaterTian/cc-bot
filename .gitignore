@@ -4,6 +4,9 @@ key/
 .env
 .env.local
 
+# cc-bot 运行时（含 IM token / 截图 / state，绝不进库）
+.cc-bot/
+
 # 编辑器 / 系统
 .vscode/
 .idea/

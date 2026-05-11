@@ -15,6 +15,7 @@
 #   1. 飞书真实 ID 形态（cli_ / ou_ / oc_ / om_ 后接 ≥14 位 hex）— 占位符 cli_xxxxxxxxxxxx 等不拦
 #   2. scripts/blocklist.txt 列出的真名 —— 一行一个，# 开头为注释（blocklist.txt 本身 gitignore，不进库）
 #   3. app_secret / api_key / bearer token 等常见 secret 字符串
+#   4. Slack token（xoxb- / xapp- / xoxp- / xoxa- 等），见 https://api.slack.com/authentication/token-types
 
 set -e
 
@@ -55,6 +56,17 @@ SECRET_HITS=$(echo "$ADDED" | grep -iE 'app[_-]?secret\s*[=:]\s*["'"'"']?[a-z0-9
 if [ -n "$SECRET_HITS" ]; then
   echo "❌ pre-commit 阻止：疑似 secret / api_key / bearer token"
   echo "$SECRET_HITS" | head -3 | sed 's/^/     /'
+  FAIL=1
+fi
+
+# 规则 4: Slack token（xoxb- Bot / xapp- App-Level / xoxp- User / 等）
+# 匹配 token 前缀 + 至少 10 个 alnum/-/_/. — 占位符 xoxb-... / xapp-... 等不拦
+SLACK_TOKEN_HITS=$(echo "$ADDED" | grep -oE 'x(ox[abeprs]|app)-[A-Za-z0-9._-]{10,}' || true)
+SLACK_TOKEN_REAL=$(echo "$SLACK_TOKEN_HITS" | grep -vE '\.\.\.|XXXXX|placeholder' || true)
+if [ -n "$SLACK_TOKEN_REAL" ]; then
+  echo "❌ pre-commit 阻止：检测到疑似 Slack token"
+  echo "$SLACK_TOKEN_REAL" | sort -u | head -5 | sed 's/^/     /'
+  echo "   → token 应仅在 .cc-bot/ 下的 active.json / secrets.json（gitignore 内）；占位符请用 xoxb-... / xapp-..."
   FAIL=1
 fi
 

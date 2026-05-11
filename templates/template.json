@@ -6,12 +6,24 @@
   "description": "项目一句话描述（可选）",
 
   "im": {
-    "_comment": "type 决定用哪个 adapter。目前支持：lark。后续可扩展 wecom / dingtalk / slack。bot_open_id 选填：配了能精准识别「@bot 自己」的消息；未配时保守模式 — 群里任何 @ 都不响应（包括 @ bot 自己），适合「@他人不搭理」的纯降噪诉求。",
+    "_comment": "type 决定用哪个 adapter：lark | slack。locale 影响 bot 系统级文案（上下线通知 / busy 占位）的语言，缺省按 type 走：lark=zh-CN / slack=en-US；LLM 跟用户对话的语言不受此影响（跟随用户消息）。\n\n— lark 字段：bot_app_id (cli_xxx) / bot_open_id (ou_xxx，选填，配了能精准识别 @bot；未配=任何 @ 一律不响应) / chat_id (oc_xxx)\n— slack 字段：bot_user_id (U0xxx) / chat_id (C0xxx) / extra.bot_token (xoxb-…) / extra.app_token (xapp-…，Socket Mode 必需 scope connections:write)",
     "type": "lark",
+    "locale": "",
     "bot_app_id": "cli_xxxxxxxxxxxx",
     "bot_open_id": "",
     "chat_id": "oc_xxxxxxxxxxxx",
-    "chat_name": "飞书群名称"
+    "chat_name": "飞书群名称",
+    "_slack_example": {
+      "type": "slack",
+      "locale": "",
+      "bot_user_id": "U0XXXXXXXXX",
+      "chat_id": "C0XXXXXXXXX",
+      "chat_name": "channel-name",
+      "extra": {
+        "bot_token": "xoxb-...",
+        "app_token": "xapp-1-..."
+      }
+    }
   },
 
   "project": {

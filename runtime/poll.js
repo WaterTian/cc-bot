@@ -67,6 +67,7 @@ if (!profile || !profile.im || !profile.im.type) {
 }
 
 const im = profile.im
+const IM_MODE = im.type === 'slack' ? 'push' : 'polling'  // slack = Socket Mode push；lark = polling
 let adapter
 try {
   if (im.type === 'lark') {
@@ -76,6 +77,18 @@ try {
     }
     const { LarkAdapter } = require(path.join(__dirname, '..', 'adapters', 'lark'))
     adapter = new LarkAdapter({ botAppId: im.bot_app_id })
+  } else if (im.type === 'slack') {
+    const extra = im.extra || {}
+    if (!extra.bot_token || !extra.app_token || !im.bot_user_id || !im.chat_id) {
+      console.log(`BOT_ERROR|poll.js|profile-invalid|slack 需要 im.extra.bot_token / im.extra.app_token / im.bot_user_id / im.chat_id`)
+      process.exit(1)
+    }
+    const { SlackAdapter } = require(path.join(__dirname, '..', 'adapters', 'slack'))
+    adapter = new SlackAdapter({
+      botToken: extra.bot_token,
+      appToken: extra.app_token,
+      botUserId: im.bot_user_id,
+    })
   } else {
     console.log(`BOT_ERROR|poll.js|unsupported-im|im.type=${im.type} 暂不支持`)
     process.exit(1)
@@ -86,7 +99,11 @@ try {
 }
 
 const CHAT_ID = im.chat_id
-const BOT_OPEN_ID = im.bot_open_id || ''  // 可选：配了精准识别"@bot 自己"的消息；未配时保守 — 任何 @ 一律 skip
+const BOT_OPEN_ID = im.bot_open_id || im.bot_user_id || ''  // lark 用 bot_open_id / slack 用 bot_user_id；未配时保守 — 任何 @ 一律 skip
+// locale 决策：profile 显式优先 → 按 IM 类型默认（lark=zh-CN / slack=en-US）→ 兜底 zh-CN
+// 影响范围：bot 主动发起的系统文案（busy 占位 / 上下线通知）；不影响 LLM 跟用户对话的语言
+const DEFAULT_LOCALE_BY_IM = { lark: 'zh-CN', slack: 'en-US' }
+const LOCALE = im.locale || DEFAULT_LOCALE_BY_IM[im.type] || 'zh-CN'
 const CHECK_INTERVAL_MS = Number(profile.polling_interval_ms) || 30 * 1000
 const PAGE_SIZE = 10
 const EMITTED_MAX = 200
@@ -99,41 +116,77 @@ const MAIN_BUSY_LOCK = path.join(RUNTIME_DIR, 'main-busy.lock')
 const MAIN_BUSY_NOTIFIED_FLAG = path.join(RUNTIME_DIR, 'main-busy-notified.flag')
 const MAIN_BUSY_TTL_MS = 10 * 60 * 1000  // 10min 硬编码过期兜底
 
-// 主会话忙碌时的群占位文案池（每次随机一条，避免机械重复）
-const BUSY_PLACEHOLDERS = [
-  '⏳ 主会话在忙，稍后回你',
-  '☕ 手头忙，消息记下了',
-  '⌨️ 在敲代码，稍等啊..',
-  '💭 思考中，过会儿回话',
-  '🔧 在修东西，稍等..',
-  '📝 正在写东西，消息排队了',
-  '🏃 跑任务中，马上回来',
-  '🎯 专注中，稍后回你',
-  '🫖 正在泡茶，等一下下',
-  '🐢 我手慢，请多担待',
-  '🧩 拼图差一块，马上好',
-  '🔭 对焦中，别急..',
-  '📮 消息已签收.',
-  '🎮 在打个小 boss..',
-  '🐛 在抓 bug..',
-  '🔨 锤代码呢',
-  '📚 等等...',
-  '💾 读档中，马上',
-  '⚙️ 齿轮转着呢',
-  '🛠️ 工具箱翻找中',
-  '🥱 脑子慢，多包涵',
-  '🙃 卡壳了，给点时间',
-  '🐌 蜗牛速度，但在前进',
-  '🤹 多线程杂耍中',
-  '😵‍💫 大脑过载..',
-  '🪄 咒语念到一半',
-  '🎩 召唤代码精灵中',
-  '🔄 转圈圈中，别走开',
-  '📶 信号微弱，努力中',
-  '🍜 泡面三分钟',
-]
+// 主会话忙碌时的群占位文案池（每次随机一条，避免机械重复）。
+// 按 locale 选池：zh-CN / en-US。两套都保留 emoji + 自嘲风格（cc-bot 是「群里的开发同事」人设）。
+const BUSY_PLACEHOLDERS_BY_LOCALE = {
+  'zh-CN': [
+    '⏳ 主会话在忙，稍后回你',
+    '☕ 手头忙，消息记下了',
+    '⌨️ 在敲代码，稍等啊..',
+    '💭 思考中，过会儿回话',
+    '🔧 在修东西，稍等..',
+    '📝 正在写东西，消息排队了',
+    '🏃 跑任务中，马上回来',
+    '🎯 专注中，稍后回你',
+    '🫖 正在泡茶，等一下下',
+    '🐢 我手慢，请多担待',
+    '🧩 拼图差一块，马上好',
+    '🔭 对焦中，别急..',
+    '📮 消息已签收.',
+    '🎮 在打个小 boss..',
+    '🐛 在抓 bug..',
+    '🔨 锤代码呢',
+    '📚 等等...',
+    '💾 读档中，马上',
+    '⚙️ 齿轮转着呢',
+    '🛠️ 工具箱翻找中',
+    '🥱 脑子慢，多包涵',
+    '🙃 卡壳了，给点时间',
+    '🐌 蜗牛速度，但在前进',
+    '🤹 多线程杂耍中',
+    '😵‍💫 大脑过载..',
+    '🪄 咒语念到一半',
+    '🎩 召唤代码精灵中',
+    '🔄 转圈圈中，别走开',
+    '📶 信号微弱，努力中',
+    '🍜 泡面三分钟',
+  ],
+  'en-US': [
+    '⏳ Main thread busy, hang tight',
+    '☕ Got it, message queued',
+    '⌨️ Coding away, one sec..',
+    '💭 Thinking it over, brb',
+    '🔧 Fixing something, hold on..',
+    '📝 Writing stuff, message lined up',
+    '🏃 Running tasks, back soon',
+    '🎯 Focused, will get to you',
+    '🫖 Brewing tea, just a moment',
+    '🐢 Bear with my slow pace',
+    '🧩 One piece missing, almost there',
+    '🔭 Focusing in, hold on..',
+    '📮 Message received.',
+    '🎮 Fighting a mini-boss..',
+    '🐛 Hunting bugs..',
+    '🔨 Hammering code',
+    '📚 Just a sec...',
+    '💾 Loading save file, almost',
+    '⚙️ Gears are turning',
+    '🛠️ Digging through the toolbox',
+    '🥱 Slow brain, bear with me',
+    '🙃 Stuck, need a moment',
+    '🐌 Snail pace but moving',
+    '🤹 Juggling threads',
+    '😵‍💫 Brain overloaded..',
+    '🪄 Mid-incantation',
+    '🎩 Summoning code sprites',
+    '🔄 Spinning, don\'t leave',
+    '📶 Weak signal, trying..',
+    '🍜 Three-minute noodle',
+  ],
+}
 function pickBusyPlaceholder() {
-  return BUSY_PLACEHOLDERS[Math.floor(Math.random() * BUSY_PLACEHOLDERS.length)]
+  const pool = BUSY_PLACEHOLDERS_BY_LOCALE[LOCALE] || BUSY_PLACEHOLDERS_BY_LOCALE['zh-CN']
+  return pool[Math.floor(Math.random() * pool.length)]
 }
 
 let consecutiveFailures = 0
@@ -387,4 +440,67 @@ process.on('unhandledRejection', () => {})
 function scheduleTick() {
   tick().finally(() => setTimeout(scheduleTick, CHECK_INTERVAL_MS))
 }
-setTimeout(scheduleTick, 1000)
+
+// Push 模式（slack）：单条到达，复用 tick 内部的过滤/emit 逻辑
+async function handlePushMessage(m) {
+  if (!checkStdoutTolerance()) return
+  verifyLock()
+
+  let state = readState()
+  state = guardFutureTime(state)
+  if (state.paused) return
+
+  const mainBusy = checkMainBusy()
+  const lastTime = Number(state.last_processed_time || 0)
+  const emitted = readEmitted()
+
+  if (!m || !m.id) return
+  if (emitted.has(m.id)) return
+  if (m.senderType === 'bot') return
+  if (!VALID_TYPES.has(m.type)) return
+  if (!m.createTimeMs || m.createTimeMs <= lastTime) return
+
+  if (isAtOthers(m.mentions)) {
+    appendEmitted([m.id])
+    return
+  }
+
+  if (mainBusy) {
+    // push 模式必须立刻 emit — 没有"下一 tick 重新 fetch"机制，错过 push 永久丢失。
+    // 主会话忙时 CC 会自动把 notification 排队，忙完按顺序处理 → 消息不丢 + 不打断主会话节奏。
+    // busy 占位仍只发一次（sendMainBusyPlaceholder 内部有 NOTIFIED_FLAG 去重）防刷屏。
+    console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}`)
+    appendEmitted([m.id])
+    await sendMainBusyPlaceholder()
+    return
+  }
+
+  console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}`)
+  appendEmitted([m.id])
+}
+
+async function startPushMode() {
+  try {
+    await adapter.startListening({
+      chatId: CHAT_ID,
+      onMessage: (m) => {
+        handlePushMessage(m).catch(err => {
+          console.log(`BOT_ERROR|poll.js|push-handler|${err.message}`)
+        })
+      },
+      onError: (err) => {
+        console.log(`BOT_ERROR|poll.js|push-stream|${err && err.message || String(err)}`)
+      },
+    })
+    console.log(`BOT_INFO|poll.js|push-listening|${im.type}|${CHAT_ID}`)
+  } catch (err) {
+    console.log(`BOT_ERROR|poll.js|push-start|${err.message}`)
+    process.exit(1)
+  }
+}
+
+if (IM_MODE === 'push') {
+  setTimeout(startPushMode, 1000)
+} else {
+  setTimeout(scheduleTick, 1000)
+}

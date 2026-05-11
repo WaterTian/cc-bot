@@ -134,7 +134,9 @@ Read profile  ──┐
 
 ### 开关通知
 
-**上线通知**（/cc-bot:start，HUD 可用时）：
+**i18n 规则**：上下线通知 / busy 占位 / 帮助等**系统级文案**按 `profile.im.locale` 选语言，缺省 `lark`→`zh-CN`、`slack`→`en-US`。**LLM 回复用户消息时跟随用户语言**（用户发英文 → 回英文，发中文 → 回中文），不受 locale 控制。详细发送命令模板见 `commands/start.md` / `commands/stop.md`。
+
+**zh-CN 上线通知**（/cc-bot:start，HUD 可用时）：
 ```
 cc-bot v{version} 已上线
 模型: {model_display_name}
@@ -143,13 +145,31 @@ cc-bot v{version} 已上线
 发送「帮助」查看支持的操作
 ```
 
-**下线通知**（/cc-bot:stop，HUD 可用时）：
+**en-US 上线通知**：
+```
+cc-bot v{version} is online
+Model: {model_display_name}
+Context: {bar} X% ({used} / {total})
+
+Send 'help' to see supported actions
+```
+
+**zh-CN 下线通知**（/cc-bot:stop，HUD 可用时）：
 ```
 cc-bot v{version} 已下线
 模型: {model_display_name}
 上下文: {bar} X% ({used} / {total})
 
 Bot 进入休眠，群消息将不再响应
+```
+
+**en-US 下线通知**：
+```
+cc-bot v{version} is offline
+Model: {model_display_name}
+Context: {bar} X% ({used} / {total})
+
+Bot is going to sleep — group messages won't be handled
 ```
 
 **字段规则：**
@@ -782,7 +802,7 @@ HUD 数据由独立插件 **cc-hud** 写入 `.cc-bot/runtime/hud-stdin.json`。c
 
 ### HUD 不可用时的处理（hud-stdin.json 缺失或空）
 
-**群回复**：`HUD 数据暂不可用`（不贴命令，群成员看不懂）
+**群回复**（按 `profile.im.locale` 选）：`zh-CN` → "HUD 数据暂不可用"；`en-US` → "HUD data is not available"。不贴命令（群成员看不懂）。
 
 **主会话同时输出工程提示**（仅 `/cc-bot:start` 拼 HUD 失败 / 群里问 HUD / 主动调试 时触发；`/cc-bot:stop` 不触发）：
 - 检测 shim：`grep -q 'cc-bot.*statusline\.js' ~/.claude/settings.json` 判断已注册 / 未注册
@@ -797,8 +817,9 @@ cc-hud 是独立 statusline **渲染器**（stdin JSON → stdout，不写文件
 
 ### HUD 可用时的群消息格式
 
-群里发"状态"或"HUD"触发。读 `hud-stdin.json`：
+群里发"状态"或"HUD"（或英文 `hud` / `status`）触发。读 `hud-stdin.json`，**按 `profile.im.locale` 选语言模板**（缺省 `lark`=`zh-CN` / `slack`=`en-US`，与 §开关通知 一致）。
 
+**zh-CN**：
 ```
 Claude Code HUD
 CC: v2.1.112
@@ -807,6 +828,18 @@ CC: v2.1.112
 5h 额度: ██░░░░░░░░ 18% (剩 3.2h)
 7d 额度: ░░░░░░░░░░ 2%  (剩 6.9d)
 ```
+
+**en-US**：
+```
+Claude Code HUD
+CC: v2.1.112
+Model: Opus 4.7 (1M context)
+Context: ██░░░░░░░░ 13%  (130K / 1M)
+5h limit: ██░░░░░░░░ 18% (3.2h left)
+7d limit: ░░░░░░░░░░ 2%  (6.9d left)
+```
+
+HUD 不可用时（§HUD 不可用时的处理）：`zh-CN` → "HUD 数据暂不可用"；`en-US` → "HUD data is not available"。
 
 ### 字段来源
 

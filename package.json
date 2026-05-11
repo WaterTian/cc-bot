@@ -1,7 +1,7 @@
 {
   "name": "cc-bot",
   "version": "0.1.11",
-  "description": "接 AI 进群里开发项目 — 飞书（Lark）",
+  "description": "接 AI 进群里开发项目 — 飞书（Lark）/ Slack",
   "engines": {
     "node": ">=18.0.0"
   },
@@ -26,14 +26,21 @@
     "bot",
     "lark",
     "feishu",
+    "slack",
     "im",
     "group-chat",
     "ai-assistant",
     "monitor",
     "polling",
+    "socket-mode",
     "windows",
-    "zero-runtime-dep"
+    "macos",
+    "linux"
   ],
+  "optionalDependencies": {
+    "@slack/web-api": "^7.0.0",
+    "@slack/socket-mode": "^2.0.0"
+  },
   "author": "Water",
   "license": "MIT",
   "homepage": "https://github.com/WaterTian/cc-bot",
