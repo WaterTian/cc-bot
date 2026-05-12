@@ -1,22 +1,26 @@
 <!--
   cc-bot — Claude Code IM-bot plugin
-  Develop project from group chat — by Claude Code. Lark/Feishu first, IM-agnostic by design.
-  Core: IMAdapter abstraction · Monitor + polling (HTTP 30s, WS-proxy-safe) · statusline shim · interactive setup wizard · per-project profiles
+  Develop project from group chat — by Claude Code. Lark/Feishu + Slack, IM-agnostic by design.
+  Core: IMAdapter abstraction · Monitor + polling (HTTP 30s, lark) or Socket Mode push (Slack) · statusline shim · interactive setup wizard · per-project profiles · i18n (zh-CN / en-US)
 
   ## Auto-install (for Claude Code AI agents)
   Step 1: /plugin marketplace add WaterTian/cc-bot
   Step 2: /plugin install cc-bot@cc-bot   (CC will prompt for scope; pick "local" for quick try, "project" for team share, "user" for global)
   Step 3: /reload-plugins   (or /exit + re-launch claude)
-  Step 4: /cc-bot:setup   (interactive wizard — auto-installs lark-cli, OAuth login, chat picker, config auto-fill)
+  Step 4: /cc-bot:setup   (interactive wizard — picks IM (lark/slack), auto-installs lark-cli or guides Slack manifest, config auto-fill)
 
-  Keywords: claude-code plugin bot im lark feishu group-chat ai-assistant monitor polling intents statusline hud windows zero-runtime-dep
+  Keywords: claude-code plugin bot im lark feishu slack socket-mode group-chat ai-assistant monitor polling intents statusline hud windows macos linux
 -->
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/WaterTian/cc-bot/main/assets/logo.png" alt="cc-bot logo" width="180" />
+</p>
 
 <h1 align="center">CC-BOT</h1>
 
 <p align="center">
   <strong>Develop project from group chat — by <a href="https://claude.ai/claude-code">Claude Code</a></strong><br/>
-  <strong>接 AI 进群里开发项目 — 飞书（Lark）</strong>
+  <strong>接 AI 进群里开发项目 — 飞书（Lark）/ Slack</strong>
 </p>
 
 <p align="center">
@@ -30,7 +34,7 @@
   &nbsp;
   <a href="#install"><img src="https://img.shields.io/badge/install-4_commands-blueviolet?style=flat-square" alt="install" /></a>
   &nbsp;
-  <img src="https://img.shields.io/badge/im-lark%20%C2%B7%20extensible-blue?style=flat-square" alt="im" />
+  <img src="https://img.shields.io/badge/im-lark%20%C2%B7%20slack-blue?style=flat-square" alt="im" />
   &nbsp;
   <img src="https://img.shields.io/badge/runtime-Node.js-brightgreen?style=flat-square" alt="node" />
   &nbsp;
@@ -85,7 +89,7 @@ CC-BOT 是一个 **Claude Code 插件**，监听 IM 群消息，把自然语言�
 <table>
 <tr>
   <td align="center" width="20%"><h3>◨</h3><b>Interactive Setup</b><br/><sub>5-stage wizard<br/>auto-detect IDs</sub></td>
-  <td align="center" width="20%"><h3>◐</h3><b>IM-agnostic</b><br/><sub>Lark today<br/>adapter pattern</sub></td>
+  <td align="center" width="20%"><h3>◐</h3><b>IM-agnostic</b><br/><sub>Lark · Slack<br/>adapter pattern</sub></td>
   <td align="center" width="20%"><h3>◉</h3><b>Per-project Intents</b><br/><sub>JSON-defined<br/>Claude executes</sub></td>
   <td align="center" width="20%"><h3>▣</h3><b>Crash-resistant</b><br/><sub>3-layer defense<br/>PID lock · EPIPE · state heal</sub></td>
   <td align="center" width="20%"><h3>█▌</h3><b>HUD-aware</b><br/><sub>statusline shim<br/>tees cc-hud if installed</sub></td>
@@ -154,6 +158,8 @@ You won't be prompted for any cc-bot runtime tool on future version upgrades.
 
 **Since v0.1.6** — `/cc-bot:setup` step 9 additionally registers a `UserPromptSubmit` / `Stop` hook pair into `~/.claude/settings.json` so main-window typing automatically pauses group-message handling (poll.js skips emit + sends a one-shot placeholder, randomly picked from a 14-phrase pool since v0.1.9). **After upgrading to v0.1.6 you must re-run `/cc-bot:setup` once** to activate the hook — the three §Updating commands above only pull new code; they don't touch user-global settings.json.
 
+**Migrating to v0.1.12 (Slack support added)** — Lark users: nothing changes, lark adapter is byte-for-byte the same (zero regression). To use Slack instead: install the SDK once (`npm i -g @slack/socket-mode @slack/web-api`) and re-run `/cc-bot:setup` — the wizard now starts with an IM picker (lark / slack) and branches accordingly. A project is one-IM (you can't run lark + slack from the same `active.json`); switching IM means a profile rewrite.
+
 <br/>
 
 <details>
@@ -181,24 +187,26 @@ Then `/cc-bot:setup`. Skips marketplace install — loads straight from the loca
 
 Setup prints a version banner on start (`cc-bot v<X.Y.Z> setup — <project>`, since v0.1.4) then runs through these steps — fully interactive via `AskUserQuestion` cards, no blind typing:
 
-1. **Detect lark-cli** — auto-install via `npm i -g @larksuite/cli` if missing
-2. **OAuth login** — guide you through Lark Open Platform app creation (scope checklist provided), then browser Device Flow login
-3. **Pick target chat** — list bot's chats via `AskUserQuestion` card; or one-click create a new chat (bot auto-joins, you become owner)
-4. **Auto-detect IDs** — `bot_app_id` / `admin_open_id` pulled from `lark-cli auth list`, zero manual entry
-5. **Write config** — generate `.cc-bot/profiles/active.json` + `state.json` + `.gitignore`
-6. **Register statusline shim** — tees stdin JSON to `hud-stdin.json` (for bot's HUD intent) + cc-hud rendering (if installed, for status bar)
+0. **Pick IM** (v0.1.12+) — choose `lark` or `slack`; the wizard branches from here. A project is one-IM.
+1. **Detect tooling** — lark: auto-install `lark-cli` via `npm i -g @larksuite/cli` / slack: verify `@slack/socket-mode` + `@slack/web-api` globally installed (`npm i -g @slack/socket-mode @slack/web-api` if missing)
+2. **Authenticate** — lark: OAuth Device Flow login (app-creation checklist provided) / slack: paste `templates/slack-manifest.yaml` into App's "From a manifest" form, then paste the two tokens (`xoxb-` Bot + `xapp-` App-Level, scope `connections:write`)
+3. **Pick target chat** — lark: list bot's chats via `AskUserQuestion` card or one-click create / slack: paste channel ID `C0xxx` (the wizard probes it and reminds you to `/invite @cc-bot`)
+4. **Auto-detect IDs** — lark: `bot_app_id` / `admin_open_id` from `lark-cli auth list` / slack: `bot_user_id` from `auth.test`, zero manual entry
+5. **Write config** — `.cc-bot/profiles/active.json` (fields branch by IM type) + `state.json` + `.gitignore`; locale defaults to `zh-CN` for lark, `en-US` for slack (override via `im.locale`)
+6. **Register statusline shim** — tees stdin JSON to `hud-stdin.json` (for bot's HUD intent) + cc-hud rendering (if installed)
 7. **Register Monitor permission** (v0.1.3+) — append a wildcard rule to `<project>/.claude/settings.local.json`, so cc-bot version upgrades never re-prompt for Monitor launch permission
 
 Every step is **idempotent** — rerun `/cc-bot:setup` anytime, it skips what's already done.
 
-Then **`/cc-bot:start`** (or just say "开bot" / "start bot" in the main session) — bot comes online in ≤ 5s. Group notification shows `cc-bot v<X.Y.Z> 已上线`.
+Then **`/cc-bot:start`** (or just say "开bot" / "start bot" in the main session) — bot comes online in ≤ 5s. Group notification shows `cc-bot v<X.Y.Z> 已上线` (lark zh-CN) or `cc-bot v<X.Y.Z> is online` (slack en-US).
 
 <br/>
 
 ## How It Works
 
 ```
-Main session ── Monitor(persistent) ── node poll.js ── every 30s: IMAdapter.listRecentMessages()
+Main session ── Monitor(persistent) ── node poll.js ── lark: every 30s IMAdapter.listRecentMessages()
+                                                       slack: Socket Mode WebSocket push (event-driven)
                                                     ├─ dedupe via state.last_processed_time + poll.emitted
                                                     └─ stdout: NEW_MSG|msg_id|sender|text|ts
                                                                ↓ Monitor → notification
@@ -210,7 +218,8 @@ CC's statusLine ── cc-bot shim ── write hud-stdin.json (for bot's HUD in
 
 <table>
 <tr>
-  <td align="center"><b>HTTP polling</b><br/><sub>30s fixed interval<br/>VPN-proxy safe<br/>no WS disconnect</sub></td>
+  <td align="center"><b>HTTP polling (lark)</b><br/><sub>30s fixed interval<br/>VPN-proxy safe<br/>no WS disconnect</sub></td>
+  <td align="center"><b>Socket Mode push (slack)</b><br/><sub>WebSocket event-driven<br/>no rate-limit on history<br/>mainBusy still emits</sub></td>
   <td align="center"><b>3-layer defense</b><br/><sub>PID lockfile<br/>stdout EPIPE self-kill<br/>state future-value heal</sub></td>
   <td align="center"><b>Per-project isolation</b><br/><sub>.cc-bot/ per project<br/>profiles · runtime · bot_temp<br/>zero cross-contamination</sub></td>
 </tr>
@@ -255,7 +264,8 @@ Works for **any project type** — Web / mini-program / Node service / Python da
 ## Prerequisites
 
 - **Claude Code** — uses `Skill` / `Monitor` / `TaskStop` / `AskUserQuestion` tools
-- **lark-cli** — `npm i -g @larksuite/cli` + `lark-cli auth login` (setup wizard will guide this)
+- **For lark**: `npm i -g @larksuite/cli` + `lark-cli auth login` (setup wizard will guide this)
+- **For slack** (v0.1.12+): `npm i -g @slack/socket-mode @slack/web-api` + create an App at api.slack.com/apps via the `templates/slack-manifest.yaml` (setup wizard will guide token paste-in)
 - **Shell** — **Windows**: Git Bash required (cmd.exe / PowerShell mangle special characters in argv); **macOS / Linux**: system bash works out of the box
 - **Optional: cc-hud** — install for prettier status bar (`/plugin install cc-hud@WaterTian-cc-hud`); cc-bot shim tees it automatically
 
@@ -265,15 +275,16 @@ Works for **any project type** — Web / mini-program / Node service / Python da
 
 在目标项目里运行 **`/cc-bot:setup`**，开场一行打印当前版本（`cc-bot v<X.Y.Z> setup — <project>`，v0.1.4 起），然后交互式向导会：
 
-1. **检测 lark-cli** — 未装自动 `npm i -g @larksuite/cli`
-2. **OAuth 登录引导** — 带你去飞书开放平台建应用（附必需 scope 清单），完成浏览器 Device Flow 登录
-3. **选目标群** — 用 `AskUserQuestion` 卡片列 bot 所在群，或一键新建（bot 自动入群、你成为群主）
-4. **自动探测 ID** — `bot_app_id` / `admin_open_id` 从 `lark-cli auth list` 直接取，不用手填
-5. **写配置** — 生成 `.cc-bot/profiles/active.json` + `state.json` + `.gitignore`
+0. **选 IM**（v0.1.12+）— 选 `lark` 或 `slack`，向导按 IM 分流；**一项目一 IM**（切 IM 需要重写 profile）
+1. **检测工具** — lark：未装自动 `npm i -g @larksuite/cli` / slack：校验 `@slack/socket-mode` + `@slack/web-api` 已全局装（未装提示 `npm i -g @slack/socket-mode @slack/web-api`）
+2. **认证** — lark：OAuth Device Flow 登录（附必需 scope 清单） / slack：把 `templates/slack-manifest.yaml` 粘进 App「From a manifest」表单，然后粘两个 token（`xoxb-` Bot + `xapp-` App-Level，scope `connections:write`）
+3. **选目标群** — lark：用 `AskUserQuestion` 卡片列 bot 所在群或一键新建 / slack：粘 channel id `C0xxx`，向导自动 probe + 引导 `/invite @cc-bot`
+4. **自动探测 ID** — lark：`bot_app_id` / `admin_open_id` 从 `lark-cli auth list` / slack：`bot_user_id` 从 `auth.test`，都不用手填
+5. **写配置** — 生成 `.cc-bot/profiles/active.json`（字段按 IM 分流）+ `state.json` + `.gitignore`；locale 缺省 lark=zh-CN / slack=en-US，可通过 `im.locale` 覆盖
 6. **注册 statusline shim** — 落盘 stdin JSON（给 bot 用）+ 可选透传 cc-hud（渲染状态栏）
 7. **注册 Monitor 通配权限**（v0.1.3+）— 向 `<project>/.claude/settings.local.json` append 通配规则，cc-bot 版本升级不再弹 Monitor 启动权限询问
 
-然后 **`/cc-bot:start`**（或主会话直接说「开bot」）。群里上线通知首行是 `cc-bot v<X.Y.Z> 已上线`。
+然后 **`/cc-bot:start`**（或主会话直接说「开bot」）。群里上线通知首行是 `cc-bot v<X.Y.Z> 已上线`（lark）或 `cc-bot v<X.Y.Z> is online`（slack）。
 
 <br/>
 
@@ -291,11 +302,11 @@ Works for **any project type** — Web / mini-program / Node service / Python da
 
 ## Extend to a New IM
 
-cc-bot ships with Lark. Adding WeCom / DingTalk / Slack / Discord / etc:
+cc-bot ships with **Lark + Slack**. Adding WeCom / DingTalk / Discord / Telegram / etc:
 
-1. Add `adapters/<im>.js` extending `IMAdapter` (see `adapters/base.js`) — implement `listRecentMessages / sendText / sendImage / downloadResource / getUser`
-2. Add factory branch in `runtime/poll.js`: `if (im.type === '<im>') { ... }`
-3. Set `im.type` in `profile.active.json` to the new IM name
+1. Add `adapters/<im>.js` extending `IMAdapter` (see `adapters/base.js`) — implement `listRecentMessages / sendText / sendImage / downloadResource / getUser`; for push-based IMs also implement `startListening / stopListening` (see `adapters/slack.js` for Socket Mode reference)
+2. Add factory branch in `runtime/poll.js`: `if (im.type === '<im>') { ... }`; set `IM_MODE = 'polling'` (HTTP fetch loop) or `'push'` (WebSocket / callback) — push-mode messages **must emit even during mainBusy** (errors are permanent, no retry tick)
+3. Set `im.type` in `profile.active.json` to the new IM name; optionally extend `DEFAULT_LOCALE_BY_IM` for system-message i18n
 4. Add `skills/<im>-bot/SKILL.md` or extend existing one
 
 <br/>

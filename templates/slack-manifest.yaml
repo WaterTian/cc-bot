@@ -13,7 +13,7 @@
 display_information:
   name: cc-bot
   description: Claude Code-powered group project assistant
-  background_color: "#1a1a1a"
+  background_color: "#1f3a2a"  # PCB 暗绿，配合 cc-bot logo（绿色基板）
 
 features:
   bot_user:

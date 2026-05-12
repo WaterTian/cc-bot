@@ -11,6 +11,7 @@
     "commands/",
     "skills/",
     "templates/",
+    "assets/",
     ".claude-plugin/",
     "README.md",
     "CHANGELOG.md",
