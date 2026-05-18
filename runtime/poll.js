@@ -16,7 +16,7 @@
 //   }
 //
 // 三层防御（2026-04-20 polling 架构三坑对策，不可删除）：
-//   ① PID lockfile 单例锁 — 启动旧进程活则 exit 0；每 tick 校验 pid 文件仍是自己
+//   ① PID lockfile 单例锁 — 启动旧进程活则落 last-startup-error.json + exit 0；每 tick 校验 pid 文件仍是自己
 //   ② stdout EPIPE 容错自杀 — 单轮不可写 skip 当轮，连续 3 轮（~90s）才 exit 防污染 poll.emitted；
 //      退出前写 events.log 留诊断痕迹（瞬断不死，真断才死）
 //   ③ state.last_processed_time 未来值防御 — 超 now+60s 自愈 + emit BOT_ERROR
@@ -47,6 +47,7 @@ const RUNTIME_DIR = path.join(CCB_DIR, 'runtime')
 const STATE_FILE = path.join(RUNTIME_DIR, 'state.json')
 const EMITTED_FILE = path.join(RUNTIME_DIR, 'poll.emitted')
 const PID_FILE = path.join(RUNTIME_DIR, 'poll.pid')
+const LAST_STARTUP_ERROR_FILE = path.join(RUNTIME_DIR, 'last-startup-error.json')
 
 try { fs.mkdirSync(RUNTIME_DIR, { recursive: true }) } catch {}
 
@@ -209,13 +210,27 @@ function acquireLock() {
   try {
     const existing = fs.readFileSync(PID_FILE, 'utf8').trim()
     if (existing && pidAlive(existing)) {
-      console.log(`BOT_INFO|poll.js|lock-taken-by-pid-${existing}|另一个实例已在跑，本进程退出`)
+      console.log(`BOT_INFO|poll.js|lock-taken-by-pid-${existing}|另一个实例已在跑，本进程退出（详情见 runtime/last-startup-error.json）`)
+      // 落盘启动失败记录：30s 窗口期撞车 / 真有合法实例并存时给 doctor + 用户可见反馈，
+      // 不再静默 exit(0)。群提示不在此发——交主会话收到上方 BOT_INFO notification 后决定。
+      try {
+        fs.writeFileSync(LAST_STARTUP_ERROR_FILE, JSON.stringify({
+          ts: Date.now(),
+          iso: new Date().toISOString(),
+          reason: 'lock-taken',
+          pid: process.pid,
+          blocked_by_pid: Number(existing),
+          message: `acquireLock 失败：poll.pid 被活进程 ${existing} 持有，本进程 ${process.pid} 退出。若确认 ${existing} 是孤儿，杀掉它并删除 poll.pid 后重启`,
+        }, null, 2), 'utf8')
+      } catch {}
       process.exit(0)
     }
   } catch {}
   try {
     fs.writeFileSync(PID_FILE, String(process.pid), 'utf8')
   } catch {}
+  // 成功取锁 → 清掉可能残留的上次启动失败记录（doctor 据此判断「上次启动是否正常」）
+  try { fs.unlinkSync(LAST_STARTUP_ERROR_FILE) } catch {}
   // 注意：main-busy.lock 故意不在此清理（与 poll.pid / poll.emitted 不同策略）。
   // 原因：启动 bot 时 CC 主窗口可能正在对话（hook 已写 lock），清掉会让群消息
   // 立刻 emit 打断主窗口任务；残留过期 lock 由 checkMainBusy() 10min 自动清。

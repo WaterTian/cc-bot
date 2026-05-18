@@ -10,6 +10,7 @@
     "runtime/",
     "commands/",
     "skills/",
+    "agents/",
     "templates/",
     "assets/",
     ".claude-plugin/",

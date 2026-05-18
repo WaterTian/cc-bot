@@ -23,6 +23,8 @@ cc-bot/
 ├── skills/
 │   └── lark-bot/
 │       └── SKILL.md             # bot 行为规范（命名遗留，实际服务 lark + slack 两端）
+├── agents/                      # 插件自带 subagent（agents/ 目录自动发现，注册为 cc-bot:<name>）
+│   └── worker.md                # cc-bot:worker — 消息调度派单的群任务执行 agent（v0.1.13+，固化发群/回报/脱敏/local-first/证据驱动）
 ├── commands/                    # slash 命令（由 plugin.json 注册）
 │   ├── setup.md                 # /cc-bot:setup（v0.1.12+ Stage 0 选 IM 后按 lark / slack 分流）
 │   ├── start.md / stop.md       # /cc-bot:start / /cc-bot:stop（按 im.type 选发送方式 + locale 双语模板）

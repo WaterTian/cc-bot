@@ -489,21 +489,14 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 30s 主
 1. Edit `agents.json`，把任务写进 `running[]`
 2. 回群占位消息：「好，开始 X」（≤15 字，§ACK 响应节奏不变）
 3. 推进 `state.json.last_processed_time = msg.create_time`（**不等 subagent 完成**，派出去就算处理完）
-4. 调 `Agent`，参数：
+4. 调 `Agent` 派 worker，参数：
+   - `subagent_type: 'cc-bot:worker'` **必填** — cc-bot 插件自带的群任务执行 agent（`agents/worker.md`）。发群方式（lark / slack 分流）/ 回报格式（≤200 字结论先行）/ 脱敏 / 研究类 local-first / 证据驱动 vs 假设驱动，**均已在 worker.md 内固化**
    - `run_in_background: true` **必填**
-   - `subagent_type` 按任务选（改代码 = general-purpose，跨目录搜索 = Explore）
-   - prompt 必备段（任选合成）：
+   - prompt 只传以下 4 个值（worker.md 已含全部行为规范，**不要在此重复发群模板 / 回报要求 / 脱敏规则**）：
      - 任务描述
-     - `profile.project.root` 绝对路径（工作区）
-     - "完成后回报 ≤ 200 字"
-     - **"结果发群模板**（原样粘贴使用，`<>` 替换实际值）：
-       ```bash
-       LARK_CLI_NO_PROXY=1 lark-cli im +messages-reply --as bot \
-         --message-id <msg_id> \
-         --msg-type text \
-         --content '{"text":"<结论正文，换行用 \\n 转义>"}'
-       ```
-       其中 `msg_id` 是触发本任务的用户消息 id（主会话派单时从 NEW_MSG 传入 prompt）。**禁止用 `--text` 参数 + 反引号/`$'...'`**，Windows Git Bash 下 `\n` 会被当字面量
+     - `项目根 = <profile.project.root 绝对路径>`
+     - `msg_id = <触发本任务的用户消息 id，从 NEW_MSG 取>`（worker 据此 lark 发群）
+     - `plugin_root = ${CLAUDE_PLUGIN_ROOT}`（worker 据此 slack 发群 —— subagent 运行时此环境变量为空，必须由主会话传入）
 5. 主会话本次响应结束，继续接下条 NEW_MSG
 
 ### Fan-out（单消息多 subagent 并行）

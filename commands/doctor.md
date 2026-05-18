@@ -44,6 +44,14 @@ Execute checks in parallel where possible. Collect results, then print one unifi
   - 存在 → 读出 pid，用 `tasklist //FI "pid eq <pid>"` (Windows) 或 `ps -p <pid>` (unix) 验证
     - 进程活 + state.monitor_task_id 非空 → ✓
     - 进程死 → ⚠ 陈旧 pid 文件，建议 `rm .cc-bot/runtime/poll.pid`
+- `last-startup-error.json` exists?（v0.1.13+，acquireLock 失败时 poll.js 落盘）
+  - 不存在 → ✓（上次启动未遇撞锁）
+  - 存在 → 读出 `iso` / `reason` / `blocked_by_pid` / `message`：
+    - ⚠ 报告「上次 `/cc-bot:start` 启动失败」+ 失败时间（`iso`）+ 原因（`reason`）+ 被占 pid（`blocked_by_pid`）
+    - 进一步用 `tasklist //FI "pid eq <blocked_by_pid>"` (Windows) / `ps -p <blocked_by_pid>` (unix) 查该 pid 是否仍活：
+      - 已死 → ⚠ 占锁进程已退，残留陈旧 `poll.pid`；建议 `rm .cc-bot/runtime/poll.pid` 后重跑 `/cc-bot:start`
+      - 仍活 → ⚠ 确有另一实例（或 30s 内未自杀的孤儿）；按 `message` 字段指引处理
+    - 注：成功 `/cc-bot:start` 后此文件由 poll.js acquireLock 自动清除；文件仍在 = 之后没有成功启动过
 - `state.last_processed_time`：若是数字且距今 > 24h 且 `paused=false` → ⚠ 提示 bot 可能长期未收到消息
 
 ### 4. Zombie permissions (settings.local.json)
@@ -120,7 +128,7 @@ cc-bot doctor — <project.display_name 或 project-root basename>
 <字段校验结果>
 
 ## 运行时
-<Monitor / poll.pid / state.last_processed_time>
+<Monitor / poll.pid / last-startup-error / state.last_processed_time>
 
 ## 权限扫描
 <零僵尸则 ✓ "未发现硬编码旧版本路径"；否则列出僵尸条目>
