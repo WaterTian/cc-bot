@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Develop project from group chat — by Claude Code (Lark/Feishu first, more IMs extensible)",
-    "version": "0.1.12"
+    "version": "0.1.13"
   },
   "plugins": [
     {

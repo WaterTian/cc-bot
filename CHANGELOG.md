@@ -4,6 +4,11 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.13] - 2026-05-18
+
+- feat: v0.1.13 候选 — cc-bot:worker agent + acquireLock 失败落盘 + doctor 检查
+- docs: v0.1.12 文档同步 + cc-bot logo + Slack manifest 配色
+
 ## [0.1.12] - 2026-05-12
 
 - feat: v0.1.12 候选 — Slack adapter（Socket Mode）+ i18n + 跨平台
