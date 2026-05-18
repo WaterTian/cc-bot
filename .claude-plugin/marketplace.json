@@ -4,7 +4,7 @@
     "name": "Water"
   },
   "metadata": {
-    "description": "Develop project from group chat — by Claude Code (Lark/Feishu first, more IMs extensible)",
+    "description": "Develop project from group chat — by Claude Code. Lark/Feishu + Slack, IM-agnostic.",
     "version": "0.1.13"
   },
   "plugins": [
@@ -18,15 +18,17 @@
         "im",
         "lark",
         "feishu",
+        "slack",
         "group-chat",
         "ai-assistant",
         "monitor",
-        "polling",
+        "socket-mode",
         "intents",
         "statusline",
         "hud",
         "windows",
-        "zero-runtime-dep"
+        "macos",
+        "linux"
       ]
     }
   ]

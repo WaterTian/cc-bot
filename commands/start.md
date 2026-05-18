@@ -16,7 +16,7 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
 2. **并行发起以下 5 个操作（同一响应的多 tool call）：**
    - Edit `.cc-bot/runtime/state.json`: `paused=false, monitor_task_id=null`
    - Bash: `mkdir -p <paths.bot_temp_abs>`（幂等）
-   - Read `.cc-bot/runtime/hud-stdin.json`（若存在 → 拼"模型 / 上下文"两行；不存在 → 只发标题 + 结尾句）
+   - Read `.cc-bot/runtime/hud-stdin.json`（若存在 → 取首行 CC 版本 + 拼"模型 / 上下文"两行；不存在 → 首行省略 cc 版本段 + 只发标题 + 结尾句）
    - Monitor: `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <project.root>`（persistent, timeout_ms=3600000）
    - Bash 发上线通知 — **按 `im.type` 选发送方式，按 `im.locale` 选文案语言**（缺省：`lark`=`zh-CN` / `slack`=`en-US`；profile.im.locale 显式覆盖）：
 
@@ -39,10 +39,12 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
      - Token 脚本自读 `.cc-bot/profiles/active.json` 的 `im.extra.bot_token`，**不要**手工拼 token 进命令行
 
      **上线模板**（按 `im.locale` 选）：
-     - `zh-CN`：`"cc-bot v{version} 已上线\n模型: {model}\n上下文: {bar} {x}% ({used} / {total})\n\n发送「帮助」查看支持的操作"`
-     - `en-US`：`"cc-bot v{version} is online\nModel: {model}\nContext: {bar} {x}% ({used} / {total})\n\nSend 'help' to see supported actions"`
+     - `zh-CN`：`"bot v{version} cc v{cc_version} 已上线\n模型: {model}\n上下文: {bar} {x}% ({used} / {total})\n\n发送「帮助」查看支持的操作"`
+     - `en-US`：`"bot v{version} cc v{cc_version} is online\nModel: {model}\nContext: {bar} {x}% ({used} / {total})\n\nSend 'help' to see supported actions"`
 
      字段：
+     - `{version}`: cc-bot 插件版本，Read plugin.json 的 `version`
+     - `{cc_version}`: Claude Code 版本，读 hud-stdin.json 顶层 `version`；**HUD 不可用拿不到时，首行省略 ` cc v{cc_version}` 段**，降级为 `bot v{version} 已上线`
      - `{model}`: 读 hud-stdin.json 的 `model.display_name`；缺失时按 SKILL.md §模型显示规则 fallback 到 id 映射，再缺就用 `Claude Code`
      - `{bar}` 进度条：`█` × round(percent/10) + `░` 补满总宽 10（例 7% → `█░░░░░░░░░`）
      - `{x}%` 整数百分比（从 `context_window.used_percentage`）

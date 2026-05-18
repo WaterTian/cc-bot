@@ -144,6 +144,8 @@ function main() {
   const mkt = readJson(FILES.marketplace)
   const pkg = readJson(FILES.pkg)
   plugin.version = next
+  // 同步 plugin.json description 末尾的版本标记「· vX.Y.Z」（marketplace UI 显示此 description）
+  if (plugin.description) plugin.description = plugin.description.replace(/· v\d+\.\d+\.\d+/, `· v${next}`)
   mkt.metadata.version = next
   pkg.version = next
 
@@ -153,7 +155,7 @@ function main() {
   const newChangelog = prependChangelog(next, entry)
 
   log('\nfiles to update:')
-  log(`  ${path.relative(ROOT, FILES.plugin)}       version → ${next}`)
+  log(`  ${path.relative(ROOT, FILES.plugin)}       version + description → ${next}`)
   log(`  ${path.relative(ROOT, FILES.marketplace)}  metadata.version → ${next}`)
   log(`  ${path.relative(ROOT, FILES.pkg)}                 version → ${next}`)
   log(`  ${path.relative(ROOT, FILES.changelog)}           prepend [${next}] entry (${commits.length} commits)\n`)

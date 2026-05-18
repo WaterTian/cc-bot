@@ -105,7 +105,9 @@ cp scripts/blocklist.txt.example scripts/blocklist.txt
 
 ## 发版流程（维护者）
 
-一键 bump 脚本 `scripts/release.js`：原子更新 `plugin.json` + `marketplace.json` + `package.json` 三处版本号、prepend CHANGELOG.md、commit、tag、（可选）push、（可选）建 GitHub Release。
+一键 bump 脚本 `scripts/release.js`：原子更新版本号、prepend CHANGELOG.md、commit、tag、（可选）push、（可选）建 GitHub Release。
+
+**版本号同步**：`release.js` 自动更新 `plugin.json`（`version` + `description` 末尾 `· vX.Y.Z` 标记）/ `marketplace.json`（`metadata.version`）/ `package.json`（`version`）/ `CHANGELOG.md` / git tag。新增带版本号的展示位必须同步加进 `release.js` 的 bump 逻辑 —— 禁止留手动改的版本号。
 
 ```bash
 node scripts/release.js patch              # 0.1.1 → 0.1.2（默认不推，手工 git push）

@@ -1,6 +1,6 @@
 {
   "name": "cc-bot",
-  "description": "接 AI 进群里开发项目 — 飞书（Lark）",
+  "description": "接 AI 进群里开发项目 — 飞书（Lark）/ Slack · v0.1.13",
   "version": "0.1.13",
   "author": {
     "name": "Water"
@@ -25,12 +25,15 @@
     "bot",
     "lark",
     "feishu",
+    "slack",
     "im",
     "group-chat",
     "ai-assistant",
     "monitor",
     "polling",
+    "socket-mode",
     "windows",
-    "zero-runtime-dep"
+    "macos",
+    "linux"
   ]
 }

@@ -122,7 +122,7 @@ Inside Claude Code **in your target project**, run these in order:
 - Line 4 — enter the **interactive setup wizard** (lark-cli auto-install, OAuth login, chat picker via AskUserQuestion cards, config auto-fill)
 
 > [!NOTE]
-> 若 `/reload-plugins` 不可用或命令表仍没出现 `/cc-bot:*`，退一步 `/exit` 重开 Claude Code 即可。
+> If `/reload-plugins` is unavailable or `/cc-bot:*` commands still don't appear, fall back to `/exit` and relaunch Claude Code.
 
 <br/>
 
@@ -137,28 +137,14 @@ When a new release is announced, run these in **each project** using cc-bot:
 /cc-bot:doctor                       # verify: first line prints "cc-bot v<new-version>"
 ```
 
-- **Before upgrading** — run `/cc-bot:doctor` first; it compares installed version with the latest GitHub release and prints the upgrade hint if drifted, plus flags stale permissions or profile issues.
-- **After upgrading** — run `/cc-bot:doctor` again to confirm the new version is active; or run `/cc-bot:start` and the group online notification will show `cc-bot v<new-version> 已上线`. Setup's greeting + completion lines also carry `v<version>` (since v0.1.4) for the same reason.
+- **Before / after upgrading** — run `/cc-bot:doctor`; it flags version drift, stale permissions, profile issues, and confirms the active version.
+- **If the bot is running** — `/cc-bot:stop` **before** updating, `/cc-bot:start` **after**; `/reload-plugins` does **not** update an already-running Monitor.
+- **Re-run `/cc-bot:setup` after upgrading** — idempotent (skips what's already done); refreshes anything a release introduced (Monitor permission rule, main-window hooks, IM picker). Always safe.
 
-### Stable permission pattern (auto-registered since v0.1.3)
-
-CC's plugin cache is version-indexed (`~/.claude/plugins/cache/cc-bot/cc-bot/<version>/`). After each upgrade the Monitor launch path points to a new version dir, so CC would otherwise re-prompt for permission.
-
-**Since v0.1.3**, `/cc-bot:setup` auto-writes a wildcard rule to `<project>/.claude/settings.local.json`. **As of v0.1.11** the wildcard covers the entire `runtime/*.js` directory (was just `poll.js`), so future runtime tools (e.g. `check-image-size.js`) no longer require re-running setup:
-
-```
-Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)
-```
-
-You won't be prompted for any cc-bot runtime tool on future version upgrades.
-
-**For v0.1.2 or earlier installs** (pre-auto): after you update, re-run `/cc-bot:setup` — step 9 is idempotent and will append the rule. Or add it manually.
-
-**Migrating from v0.1.10 or earlier** (had the older `runtime/poll.js --project *` rule): re-run `/cc-bot:setup` once — it appends the new `runtime/*.js *` wildcard while keeping the old single-file rule intact for backwards compatibility.
-
-**Since v0.1.6** — `/cc-bot:setup` step 9 additionally registers a `UserPromptSubmit` / `Stop` hook pair into `~/.claude/settings.json` so main-window typing automatically pauses group-message handling (poll.js skips emit + sends a one-shot placeholder, randomly picked from a 14-phrase pool since v0.1.9). **After upgrading to v0.1.6 you must re-run `/cc-bot:setup` once** to activate the hook — the three §Updating commands above only pull new code; they don't touch user-global settings.json.
-
-**Migrating to v0.1.12 (Slack support added)** — Lark users: nothing changes, lark adapter is byte-for-byte the same (zero regression). To use Slack instead: install the SDK once (`npm i -g @slack/socket-mode @slack/web-api`) and re-run `/cc-bot:setup` — the wizard now starts with an IM picker (lark / slack) and branches accordingly. A project is one-IM (you can't run lark + slack from the same `active.json`); switching IM means a profile rewrite.
+> [!NOTE]
+> **Why re-running setup matters** — `/cc-bot:setup` auto-registers a wildcard permission rule (`Bash(node .../cc-bot/*/runtime/*.js *)`) so version upgrades never re-prompt for Monitor launch, and registers main-window hooks into `~/.claude/settings.json` (the §Updating commands above only pull code, not user-global settings).
+>
+> **Switching a project to Slack** (v0.1.12+) — install the SDK (`npm i -g @slack/socket-mode @slack/web-api`), then re-run `/cc-bot:setup`; the wizard starts with an IM picker. One project = one IM.
 
 <br/>
 
@@ -185,20 +171,37 @@ Then `/cc-bot:setup`. Skips marketplace install — loads straight from the loca
 
 ## Quick Start — what `/cc-bot:setup` does
 
-Setup prints a version banner on start (`cc-bot v<X.Y.Z> setup — <project>`, since v0.1.4) then runs through these steps — fully interactive via `AskUserQuestion` cards, no blind typing:
+Setup prints a version banner on start (`cc-bot v<X.Y.Z> setup — <project>`) then runs through these steps — fully interactive via `AskUserQuestion` cards, no blind typing:
 
-0. **Pick IM** (v0.1.12+) — choose `lark` or `slack`; the wizard branches from here. A project is one-IM.
+0. **Pick IM** — choose `lark` or `slack`; the wizard branches from here. A project is one-IM.
 1. **Detect tooling** — lark: auto-install `lark-cli` via `npm i -g @larksuite/cli` / slack: verify `@slack/socket-mode` + `@slack/web-api` globally installed (`npm i -g @slack/socket-mode @slack/web-api` if missing)
 2. **Authenticate** — lark: OAuth Device Flow login (app-creation checklist provided) / slack: paste `templates/slack-manifest.yaml` into App's "From a manifest" form, then paste the two tokens (`xoxb-` Bot + `xapp-` App-Level, scope `connections:write`)
 3. **Pick target chat** — lark: list bot's chats via `AskUserQuestion` card or one-click create / slack: paste channel ID `C0xxx` (the wizard probes it and reminds you to `/invite @cc-bot`)
 4. **Auto-detect IDs** — lark: `bot_app_id` / `admin_open_id` from `lark-cli auth list` / slack: `bot_user_id` from `auth.test`, zero manual entry
 5. **Write config** — `.cc-bot/profiles/active.json` (fields branch by IM type) + `state.json` + `.gitignore`; locale defaults to `zh-CN` for lark, `en-US` for slack (override via `im.locale`)
 6. **Register statusline shim** — tees stdin JSON to `hud-stdin.json` (for bot's HUD intent) + cc-hud rendering (if installed)
-7. **Register Monitor permission** (v0.1.3+) — append a wildcard rule to `<project>/.claude/settings.local.json`, so cc-bot version upgrades never re-prompt for Monitor launch permission
+7. **Register Monitor permission** — append a wildcard rule to `<project>/.claude/settings.local.json`, so cc-bot version upgrades never re-prompt for Monitor launch permission
 
 Every step is **idempotent** — rerun `/cc-bot:setup` anytime, it skips what's already done.
 
-Then **`/cc-bot:start`** (or just say "开bot" / "start bot" in the main session) — bot comes online in ≤ 5s. Group notification shows `cc-bot v<X.Y.Z> 已上线` (lark zh-CN) or `cc-bot v<X.Y.Z> is online` (slack en-US).
+Then **`/cc-bot:start`** — bot comes online in ≤ 5s.
+
+<br/>
+
+## 快速开始（中文）
+
+在目标项目里运行 **`/cc-bot:setup`**，开场一行打印当前版本（`cc-bot v<X.Y.Z> setup — <project>`），然后交互式向导会：
+
+0. **选 IM** — 选 `lark` 或 `slack`，向导按 IM 分流；**一项目一 IM**（切 IM 需要重写 profile）
+1. **检测工具** — lark：未装自动 `npm i -g @larksuite/cli` / slack：校验 `@slack/socket-mode` + `@slack/web-api` 已全局装（未装提示 `npm i -g @slack/socket-mode @slack/web-api`）
+2. **认证** — lark：OAuth Device Flow 登录（附必需 scope 清单） / slack：把 `templates/slack-manifest.yaml` 粘进 App「From a manifest」表单，然后粘两个 token（`xoxb-` Bot + `xapp-` App-Level，scope `connections:write`）
+3. **选目标群** — lark：用 `AskUserQuestion` 卡片列 bot 所在群或一键新建 / slack：粘 channel id `C0xxx`，向导自动 probe + 引导 `/invite @cc-bot`
+4. **自动探测 ID** — lark：`bot_app_id` / `admin_open_id` 从 `lark-cli auth list` / slack：`bot_user_id` 从 `auth.test`，都不用手填
+5. **写配置** — 生成 `.cc-bot/profiles/active.json`（字段按 IM 分流）+ `state.json` + `.gitignore`；locale 缺省 lark=zh-CN / slack=en-US，可通过 `im.locale` 覆盖
+6. **注册 statusline shim** — 落盘 stdin JSON（给 bot 用）+ 可选透传 cc-hud（渲染状态栏）
+7. **注册 Monitor 通配权限** — 向 `<project>/.claude/settings.local.json` append 通配规则，cc-bot 版本升级不再弹 Monitor 启动权限询问
+
+然后 **`/cc-bot:start`**，bot ≤ 5s 上线。
 
 <br/>
 
@@ -265,26 +268,9 @@ Works for **any project type** — Web / mini-program / Node service / Python da
 
 - **Claude Code** — uses `Skill` / `Monitor` / `TaskStop` / `AskUserQuestion` tools
 - **For lark**: `npm i -g @larksuite/cli` + `lark-cli auth login` (setup wizard will guide this)
-- **For slack** (v0.1.12+): `npm i -g @slack/socket-mode @slack/web-api` + create an App at api.slack.com/apps via the `templates/slack-manifest.yaml` (setup wizard will guide token paste-in)
+- **For slack**: `npm i -g @slack/socket-mode @slack/web-api` + create an App at api.slack.com/apps via the `templates/slack-manifest.yaml` (setup wizard will guide token paste-in)
 - **Shell** — **Windows**: Git Bash required (cmd.exe / PowerShell mangle special characters in argv); **macOS / Linux**: system bash works out of the box
 - **Optional: cc-hud** — install for prettier status bar (`/plugin install cc-hud@WaterTian-cc-hud`); cc-bot shim tees it automatically
-
-<br/>
-
-## 快速开始（中文）
-
-在目标项目里运行 **`/cc-bot:setup`**，开场一行打印当前版本（`cc-bot v<X.Y.Z> setup — <project>`，v0.1.4 起），然后交互式向导会：
-
-0. **选 IM**（v0.1.12+）— 选 `lark` 或 `slack`，向导按 IM 分流；**一项目一 IM**（切 IM 需要重写 profile）
-1. **检测工具** — lark：未装自动 `npm i -g @larksuite/cli` / slack：校验 `@slack/socket-mode` + `@slack/web-api` 已全局装（未装提示 `npm i -g @slack/socket-mode @slack/web-api`）
-2. **认证** — lark：OAuth Device Flow 登录（附必需 scope 清单） / slack：把 `templates/slack-manifest.yaml` 粘进 App「From a manifest」表单，然后粘两个 token（`xoxb-` Bot + `xapp-` App-Level，scope `connections:write`）
-3. **选目标群** — lark：用 `AskUserQuestion` 卡片列 bot 所在群或一键新建 / slack：粘 channel id `C0xxx`，向导自动 probe + 引导 `/invite @cc-bot`
-4. **自动探测 ID** — lark：`bot_app_id` / `admin_open_id` 从 `lark-cli auth list` / slack：`bot_user_id` 从 `auth.test`，都不用手填
-5. **写配置** — 生成 `.cc-bot/profiles/active.json`（字段按 IM 分流）+ `state.json` + `.gitignore`；locale 缺省 lark=zh-CN / slack=en-US，可通过 `im.locale` 覆盖
-6. **注册 statusline shim** — 落盘 stdin JSON（给 bot 用）+ 可选透传 cc-hud（渲染状态栏）
-7. **注册 Monitor 通配权限**（v0.1.3+）— 向 `<project>/.claude/settings.local.json` append 通配规则，cc-bot 版本升级不再弹 Monitor 启动权限询问
-
-然后 **`/cc-bot:start`**（或主会话直接说「开bot」）。群里上线通知首行是 `cc-bot v<X.Y.Z> 已上线`（lark）或 `cc-bot v<X.Y.Z> is online`（slack）。
 
 <br/>
 
