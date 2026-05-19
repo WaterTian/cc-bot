@@ -88,7 +88,7 @@ CC-BOT 是一个 **Claude Code 插件**，监听 IM 群消息，把自然语言�
 
 <table>
 <tr>
-  <td align="center" width="20%"><h3>◨</h3><b>Interactive Setup</b><br/><sub>5-stage wizard<br/>auto-detect IDs</sub></td>
+  <td align="center" width="20%"><h3>◨</h3><b>Interactive Setup</b><br/><sub>guided wizard<br/>auto-detect IDs</sub></td>
   <td align="center" width="20%"><h3>◐</h3><b>IM-agnostic</b><br/><sub>Lark · Slack<br/>adapter pattern</sub></td>
   <td align="center" width="20%"><h3>◉</h3><b>Per-project Intents</b><br/><sub>JSON-defined<br/>Claude executes</sub></td>
   <td align="center" width="20%"><h3>▣</h3><b>Crash-resistant</b><br/><sub>3-layer defense<br/>PID lock · EPIPE · state heal</sub></td>
@@ -112,11 +112,11 @@ Inside Claude Code **in your target project**, run these in order:
 - Line 1 — register the plugin source (GitHub repo)
 - Line 2 — download to `~/.claude/plugins/cache/`. CC will pop a **scope selector**; pick one:
 
-  | 选项 | 适用场景 | Recommendation |
+  | Option | When to use | Recommendation |
   |---|---|---|
-  | `Install for you` (**user** scope) | You plan to use cc-bot across many projects | ✅ 日常推荐 |
-  | `Install for all collaborators` (**project** scope) | Team project, want teammates to auto-get cc-bot on clone | ✅ 团队项目 |
-  | `Install for you, in this repo only` (**local** scope) | First-time try, don't pollute other projects | ✅ 快速试用 |
+  | `Install for you` (**user** scope) | You plan to use cc-bot across many projects | ✅ Daily use |
+  | `Install for all collaborators` (**project** scope) | Team project, want teammates to auto-get cc-bot on clone | ✅ Team projects |
+  | `Install for you, in this repo only` (**local** scope) | First-time try, don't pollute other projects | ✅ Quick try |
 
 - Line 3 — hot-reload plugin list without restarting CC (new since CC 2.1.x; faster than `/exit` + re-open)
 - Line 4 — enter the **interactive setup wizard** (lark-cli auto-install, OAuth login, chat picker via AskUserQuestion cards, config auto-fill)
@@ -171,7 +171,7 @@ Then `/cc-bot:setup`. Skips marketplace install — loads straight from the loca
 
 ## Quick Start — what `/cc-bot:setup` does
 
-Setup prints a version banner on start (`cc-bot v<X.Y.Z> setup — <project>`) then runs through these steps — fully interactive via `AskUserQuestion` cards, no blind typing:
+Setup prints a version banner on start (`cc-bot v<X.Y.Z> setup — <project>`) then runs through these steps — guided by `AskUserQuestion` cards, with IDs auto-detected wherever possible:
 
 0. **Pick IM** — choose `lark` or `slack`; the wizard branches from here. A project is one-IM.
 1. **Detect tooling** — lark: auto-install `lark-cli` via `npm i -g @larksuite/cli` / slack: verify `@slack/socket-mode` + `@slack/web-api` globally installed (`npm i -g @slack/socket-mode @slack/web-api` if missing)
