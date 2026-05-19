@@ -138,7 +138,8 @@ Read profile  ──┐
 
 **zh-CN 上线通知**（/cc-bot:start，HUD 可用时）：
 ```
-bot v{version} cc v{cc_version} 已上线
+已上线
+cc v{cc_version} bot v{version}
 模型: {model_display_name}
 上下文: {bar} X% ({used} / {total})
 
@@ -147,7 +148,8 @@ bot v{version} cc v{cc_version} 已上线
 
 **en-US 上线通知**：
 ```
-bot v{version} cc v{cc_version} is online
+Online
+cc v{cc_version} bot v{version}
 Model: {model_display_name}
 Context: {bar} X% ({used} / {total})
 
@@ -156,8 +158,7 @@ Send 'help' to see supported actions
 
 **zh-CN 下线通知**（/cc-bot:stop，HUD 可用时）：
 ```
-bot v{version} cc v{cc_version} 已下线
-模型: {model_display_name}
+已下线
 上下文: {bar} X% ({used} / {total})
 
 Bot 进入休眠，群消息将不再响应
@@ -165,17 +166,16 @@ Bot 进入休眠，群消息将不再响应
 
 **en-US 下线通知**：
 ```
-bot v{version} cc v{cc_version} is offline
-Model: {model_display_name}
+Offline
 Context: {bar} X% ({used} / {total})
 
 Bot is going to sleep — group messages won't be handled
 ```
 
 **字段规则：**
-- `{version}`：cc-bot 插件版本，Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` 的 `version`；HUD 不可用时仍保留（静态信息）
-- `{cc_version}`：Claude Code 版本，读 hud-stdin.json 顶层 `version`；**HUD 不可用拿不到时，首行省略 ` cc v{cc_version}` 段**（降级为 `bot v{version} 已上线`）
-- 模型 / 上下文 / 进度条等字段来源同 §HUD 状态推送
+- **上线通知** = 状态行 + 版本行（`cc v{cc_version} bot v{version}`）+ 模型行 + 上下文行；**下线通知** = 状态行 + 上下文行（不含版本行 / 模型行）
+- `{version}` / `{cc_version}`：cc-bot 插件版本（Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` 的 `version`）/ Claude Code 版本（读 hud-stdin.json 顶层 `version`）；仅上线通知用。上线 HUD 不可用拿不到 `{cc_version}` 时，版本行省略 `cc v{cc_version} ` 段（仅剩 `bot v{version}`，状态行保留）
+- 上下文行 HUD 不可用时静默省略；模型 / 上下文 / 进度条等字段来源同 §HUD 状态推送
 - HUD 不可用时静默省略模型 + 上下文两行（保留首行和末行），不贴安装命令
 
 ## 运行时文件

@@ -39,12 +39,12 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
      - Token 脚本自读 `.cc-bot/profiles/active.json` 的 `im.extra.bot_token`，**不要**手工拼 token 进命令行
 
      **上线模板**（按 `im.locale` 选）：
-     - `zh-CN`：`"bot v{version} cc v{cc_version} 已上线\n模型: {model}\n上下文: {bar} {x}% ({used} / {total})\n\n发送「帮助」查看支持的操作"`
-     - `en-US`：`"bot v{version} cc v{cc_version} is online\nModel: {model}\nContext: {bar} {x}% ({used} / {total})\n\nSend 'help' to see supported actions"`
+     - `zh-CN`：`"已上线\ncc v{cc_version} bot v{version}\n模型: {model}\n上下文: {bar} {x}% ({used} / {total})\n\n发送「帮助」查看支持的操作"`
+     - `en-US`：`"Online\ncc v{cc_version} bot v{version}\nModel: {model}\nContext: {bar} {x}% ({used} / {total})\n\nSend 'help' to see supported actions"`
 
      字段：
      - `{version}`: cc-bot 插件版本，Read plugin.json 的 `version`
-     - `{cc_version}`: Claude Code 版本，读 hud-stdin.json 顶层 `version`；**HUD 不可用拿不到时，首行省略 ` cc v{cc_version}` 段**，降级为 `bot v{version} 已上线`
+     - `{cc_version}`: Claude Code 版本，读 hud-stdin.json 顶层 `version`；**HUD 不可用拿不到时，版本行省略 `cc v{cc_version} ` 段**，仅剩 `bot v{version}`（状态行 `已上线` 保留）
      - `{model}`: 读 hud-stdin.json 的 `model.display_name`；缺失时按 SKILL.md §模型显示规则 fallback 到 id 映射，再缺就用 `Claude Code`
      - `{bar}` 进度条：`█` × round(percent/10) + `░` 补满总宽 10（例 7% → `█░░░░░░░░░`）
      - `{x}%` 整数百分比（从 `context_window.used_percentage`）
