@@ -10,14 +10,16 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
 ### 执行
 
 1. **并行 Read**：
-   - `.cc-bot/profiles/active.json`（拿 `im.chat_id`、`im.bot_app_id`、`project.root`、`paths.bot_temp_abs`）
+   - `.cc-bot/profiles/active.json`（拿 `im.chat_id`、`im.bot_app_id`、`project.root`、`paths.bot_temp_abs`、`polling_mode`、`self_poll_interval`）
    - `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`（拿 `version`，用于上线通知标题）
 
 2. **并行发起以下 5 个操作（同一响应的多 tool call）：**
    - Edit `.cc-bot/runtime/state.json`: `paused=false, monitor_task_id=null`
    - Bash: `mkdir -p <paths.bot_temp_abs>`（幂等）
    - Read `.cc-bot/runtime/hud-stdin.json`（若存在 → 取首行 CC 版本 + 拼"模型 / 上下文"两行；不存在 → 首行省略 cc 版本段 + 只发标题 + 结尾句）
-   - Monitor: `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <project.root>`（persistent, timeout_ms=3600000）
+   - **启动消息回路 — 按 `profile.polling_mode` 分流**（缺省/缺字段 = `monitor`）：
+     - **`monitor`（默认，官方 Claude）**：用 `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <project.root>`（persistent, timeout_ms=3600000）。Monitor 把 poll.js stdout 的 NEW_MSG 转 notification 推送主会话。**默认路径，行为与历来一致。**
+     - **`self-poll`（弱 agentic 端点如 DeepSeek，无法调用 Monitor）**：**本步不开 Monitor、不进并行批**；改在第 3 步（发完通知、写好 state 后）启动轮询循环。理由：Monitor 是 deferred 工具，弱端点不会 ToolSearch 加载它、退回 Bash 后台进程而 stdout 不唤醒主会话；self-poll 用主会话自己的 `/loop` 周期跑 `poll.js --once` 绕开 Monitor。
    - Bash 发上线通知 — **按 `im.type` 选发送方式，按 `im.locale` 选文案语言**（缺省：`lark`=`zh-CN` / `slack`=`en-US`；profile.im.locale 显式覆盖）：
 
      **`im.type === 'lark'`**：用 `lark-cli` + `--content '<JSON>'` 方式（不要 `--text` + `$'...'`，Windows Git Bash 转义不稳）
@@ -51,7 +53,9 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
      - `({used} / {total})` 绝对值：`current_usage` 总和 / `context_window.context_window_size`，人类可读单位（例 `69K / 1M`）
      - HUD 不可用时**上下文整行省略**，模型若能从 fallback 拿到就仍保留，否则两行都省
 
-3. **Monitor 返回 task_id 后**：Edit state.json 回写 `monitor_task_id=<task_id>`
+3. **收尾 — 按 `polling_mode` 分流**：
+   - **`monitor`**：Monitor 返回 task_id 后 Edit state.json 回写 `monitor_task_id=<task_id>`。
+   - **`self-poll`**：`monitor_task_id` 保持 null；上线通知发出、state 写好后，调用 `loop` skill 启动消息回路 —— **固定间隔** `/loop <profile.self_poll_interval（缺省 3m）> /cc-bot:poll-once`（固定间隔底层会建一个 **cron 周期任务**，由系统驱动，不依赖主会话维持循环，对弱端点最稳）。loop 每轮跑 `/cc-bot:poll-once`（内部 `poll.js --once` 拉新消息 → 回群 → 推进 state）。**记住 /loop 返回的 cron task id**（`/cc-bot:stop` 要用它 `CronDelete` 停轮询）。详见 SKILL §self-poll 模式。
 
 ### 明确不做（精简过的动作，附回滚条件）
 

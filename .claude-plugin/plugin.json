@@ -9,6 +9,7 @@
     "./commands/setup.md",
     "./commands/start.md",
     "./commands/stop.md",
+    "./commands/poll-once.md",
     "./commands/new-profile.md",
     "./commands/switch.md",
     "./commands/doctor.md"

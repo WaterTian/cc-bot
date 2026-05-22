@@ -50,6 +50,22 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
                                                    主会话 → 意图判定 → adapter.sendText / bash lark-cli
 ```
 
+### self-poll 模式（弱 agentic 端点替代，`profile.polling_mode = 'self-poll'`）
+
+上面是默认 **monitor 模式**（官方 Claude）。弱 agentic 端点（如 DeepSeek 经 Anthropic 兼容端点）**不会 ToolSearch 加载 deferred 的 `Monitor` 工具、退回 Bash 后台进程而 stdout 不唤醒主会话** → 群消息收不到。此时改用 **self-poll 模式**：
+
+```
+主会话 ── /loop <interval>（固定间隔，harness 驱动）── 每轮跑 /cc-bot:poll-once
+                                                     └─ node poll.js --once（拉一次 + 去重/＠过滤，输出 NEW_MSG 后退出）
+                                                     └─ 主会话逐条 lark-cli 回群 + 推进 state
+```
+
+- 全程主会话**主动调常驻工具**（Bash + lark-cli + /loop），不碰 Monitor / notification / ToolSearch —— 绕开弱端点死结。
+- 启动见 `/cc-bot:start` self-poll 分支（不开 Monitor，发完通知后 `/loop <self_poll_interval，缺省 3m> /cc-bot:poll-once`）；单轮逻辑见 `/cc-bot:poll-once`。
+- **代价**：轮询驱动，无消息时空转也耗 token（vs monitor 事件驱动空闲零消耗）；DeepSeek 端点 prompt 缓存失效（`cache_control` ignored），每轮全量 input。间隔越大越省，项目助手 3~5m 延迟可接受。
+- 停止：`paused=true` 软停（poll-once 经 poll.js --once 读到 paused 立即返回不处理）；彻底结束循环需中断运行 /loop 的会话。
+- 详见 memory `reference_deepseek_agentic_incompatible`。**默认 monitor，仅显式配 self-poll 才走这套。**
+
 **IM Adapter 层**：`adapters/base.js` 定义接口（`listRecentMessages` / `sendText` / `sendImage` / `downloadResource` / `getUser`），`adapters/lark.js` 实现飞书版（包 `lark-cli`）。poll.js 读 `profile.im.type` 实例化对应 adapter。未来加企业微信/钉钉/Slack 只需新增 adapter 文件 + profile 里改 `im.type`。
 
 **为什么走 HTTP 短连接**：`lark-cli event +subscribe` 的 WebSocket 长连接在 Clash/Verge 等 vpn 代理下被静默断流，`LARK_CLI_NO_PROXY=1` 对 WS 客户端无效。HTTP 短连接走代理稳定。
@@ -317,6 +333,12 @@ profile 未定义的意图 → 回"当前项目未配置该操作，请检查 pr
 ## 消息处理 SOP
 
 收到 `NEW_MSG|{msg_id}|{sender}|{content}|{time}` 后：
+
+### 最高优先级规则 0：回群 = 工具调用，宣告不算数
+
+**回复群消息唯一算数的方式，是发起 `lark-cli im +messages-reply` 的 tool_use 并成功返回。** 在主会话里输出「我来回复」「我在群里回复他」「已回复」「bot 正常工作中」这类文字，**只有你自己看得到，不会发到群里，等于没回复**。
+
+收到 NEW_MSG 后，**在调用回群工具之前，禁止输出任何「将要回复」的宣告性文本 —— 先调工具，再说话**。判断一条消息是否处理完，看的是「`+messages-reply` 是否成功返回」，不是「我是否说了要回」。每一条需要回应的 NEW_MSG，都必须以一次真实的 `+messages-reply` tool_use 收尾（inline 路径）；只在脑子里"打算回"而没有发起工具调用 = 这条消息被你丢了。
 
 ### 最高优先级规则 1：处理完立即推进 state.json
 

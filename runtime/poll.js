@@ -442,15 +442,39 @@ async function tick() {
   if (newlyEmitted.length > 0) appendEmitted(newlyEmitted)
 }
 
+// self-poll 单次模式：跑一次拉取，输出新消息到 stdout 后退出（由 /loop 每轮驱动，不依赖 Monitor）。
+// 复用 tick 的过滤/去重逻辑，但不做 mainBusy/EPIPE/lock/常驻（单次执行不需要）。
+async function pollOnce() {
+  let state = readState()
+  state = guardFutureTime(state)
+  if (state.paused) return
+  const msgs = await pollMessages()
+  if (msgs === null) {
+    console.log(`BOT_ERROR|poll.js|once|adapter 拉取失败（认证过期或网络故障）`)
+    process.exitCode = 1
+    return
+  }
+  if (msgs.length === 0) return
+  const lastTime = Number(state.last_processed_time || 0)
+  const emitted = readEmitted()
+  const asc = [...msgs].reverse()
+  const newlyEmitted = []
+  for (const m of asc) {
+    if (!m.id) continue
+    if (emitted.has(m.id)) continue
+    if (m.senderType === 'bot') continue
+    if (!VALID_TYPES.has(m.type)) continue
+    if (!m.createTimeMs || m.createTimeMs <= lastTime) continue
+    if (isAtOthers(m.mentions)) { newlyEmitted.push(m.id); continue }
+    console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}`)
+    newlyEmitted.push(m.id)
+  }
+  if (newlyEmitted.length > 0) appendEmitted(newlyEmitted)
+}
+
 // ========== 启动 ==========
 
-acquireLock()
-
-process.on('exit', releaseLock)
-process.on('SIGINT', () => { releaseLock(); process.exit(0) })
-process.on('SIGTERM', () => { releaseLock(); process.exit(0) })
-process.on('uncaughtException', () => {})
-process.on('unhandledRejection', () => {})
+const ONCE_MODE = process.argv.includes('--once')  // self-poll：跑一次输出后退出
 
 function scheduleTick() {
   tick().finally(() => setTimeout(scheduleTick, CHECK_INTERVAL_MS))
@@ -514,8 +538,19 @@ async function startPushMode() {
   }
 }
 
-if (IM_MODE === 'push') {
-  setTimeout(startPushMode, 1000)
+if (ONCE_MODE) {
+  // self-poll 单次模式：不取锁、不常驻，跑一次输出新消息后退出（由 /loop 每轮驱动）
+  pollOnce()
+    .then(() => process.exit(process.exitCode || 0))
+    .catch((err) => { console.log(`BOT_ERROR|poll.js|once|${(err && err.message) || err}`); process.exit(1) })
 } else {
-  setTimeout(scheduleTick, 1000)
+  // 常驻模式（Monitor 托管）：与改动前逐字一致，零回归
+  acquireLock()
+  process.on('exit', releaseLock)
+  process.on('SIGINT', () => { releaseLock(); process.exit(0) })
+  process.on('SIGTERM', () => { releaseLock(); process.exit(0) })
+  process.on('uncaughtException', () => {})
+  process.on('unhandledRejection', () => {})
+  if (IM_MODE === 'push') setTimeout(startPushMode, 1000)
+  else setTimeout(scheduleTick, 1000)
 }
