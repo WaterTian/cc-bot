@@ -4,6 +4,15 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.15] - 2026-05-25
+
+- chore: gitignore docs/ 目录
+- fix: main-busy 锁过期降级模式 — 防主会话阻塞导致群消息假死
+- feat: self-poll 模式 — 弱 agentic 端点（DeepSeek）替代 Monitor 收消息
+- docs: 更新透明背景 logo.png
+- feat: 上下线通知版本行重排 + 下线精简
+- docs: README 梳理三处不一致
+
 ## [0.1.14] - 2026-05-18
 
 - feat: v0.1.14 — 通知首行加 CC 版本 + marketplace 描述/版本号同步 + README 精简
