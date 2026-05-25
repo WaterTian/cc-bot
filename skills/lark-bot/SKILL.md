@@ -359,6 +359,12 @@ profile 未定义的意图 → 回"当前项目未配置该操作，请检查 pr
 
 **升级到 fetch 10 条**：用户情绪激动（连发"？？？"）/ 连续 ACK 无回应 / 主会话刚跑完 ≥3min 工具链。宁可多 fetch，不要漏看。
 
+### 最高优先级规则 3：bot 运行时禁用阻塞主会话的交互
+
+**bot 运行时（state.paused = false），严禁使用 `AskUserQuestion` / `ExitPlanMode` 等阻塞等待终端输入的操作。** 需用户决策时，走群消息提问（`lark-cli +messages-reply`）。
+
+**Why**：`AskUserQuestion` 阻塞主会话时不触发 `Stop` → `main-busy.lock` 无法正常解锁 → 10min 过期后若 statusline 心跳也陈旧，poll.js 进入降级模式（不 emit + 持续占位），群消息无人消费。群成员在群里不在终端，选项卡永远等不到响应（实测可达 6 小时）。详见 §主会话优先级 的降级模式说明。
+
 ### 完整流程
 
 0. **fetch 核对**（见上，最高优先级 2）
@@ -579,7 +585,9 @@ subagent 完成时主会话收到自动通知（`run_in_background` 机制）。
    - `Stop` → `node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js unlock` 删锁 + 删通知标志
 2. poll.js 每 tick 开头 `checkMainBusy()`：
    - 锁存在 + 未过期 → **仍 fetch 但不 emit**（消息不进主会话事件队列）；首次见到新消息发群占位（30 条文案池随机一条）+ 写 `main-busy-notified.flag` 同锁周期内静默
-   - 锁存在 + 过期（> 10min）→ 强制删锁 + 写 `events.log` 告警 `BOT_WARN|main-busy-lock-expired|ttl-600000ms`
+   - 锁存在 + 过期（> 10min）→ 查 `hud-stdin.json` 心跳：
+	     - 心跳新鲜（< 5min）→ **孤儿锁**（Stop 漏 fire 或 unlock 失败），安全清锁 + 恢复 emit；写 `events.log` `BOT_WARN|main-busy-lock-expired-orphan`
+	     - 心跳陈旧/缺失 → **降级模式**（主会话极可能卡在 `AskUserQuestion` 等阻塞交互）：锁不删、不 emit、保持 busy，继续每 5min 发占位；写 `events.log` `BOT_ERROR|main-busy-lock-expired-degraded`。Stop 触发后正常解锁恢复
    - 锁不存在 → 正常 emit NEW_MSG
 3. 主会话响应完（Stop）→ 锁 + flag 同时删 → 下一 tick（≤ 30s）恢复正常 fetch，积压消息通过 `poll.emitted` 去重机制补 emit，不会丢
 

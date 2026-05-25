@@ -117,6 +117,11 @@ const MAIN_BUSY_LOCK = path.join(RUNTIME_DIR, 'main-busy.lock')
 const MAIN_BUSY_NOTIFIED_FLAG = path.join(RUNTIME_DIR, 'main-busy-notified.flag')
 const MAIN_BUSY_TTL_MS = 10 * 60 * 1000  // 10min 硬编码过期兜底
 
+// 降级模式心跳检测（v0.1.15）：锁过期时用 hud-stdin.json 更新时间区分「孤儿锁」vs「主会话卡死」
+const HUD_STDIN_FILE = path.join(RUNTIME_DIR, 'hud-stdin.json')
+const MAIN_BUSY_HEARTBEAT_STALE_MS = 5 * 60 * 1000  // 5min — statusline 无更新视为会话卡死
+const MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS = 5 * 60 * 1000  // 5min — 降级模式占位重发间隔
+
 // 主会话忙碌时的群占位文案池（每次随机一条，避免机械重复）。
 // 按 locale 选池：zh-CN / en-US。两套都保留 emoji + 自嘲风格（cc-bot 是「群里的开发同事」人设）。
 const BUSY_PLACEHOLDERS_BY_LOCALE = {
@@ -359,16 +364,32 @@ function isAtOthers(mentions) {
 
 // ========== 主会话优先级：锁检测 + 占位 ==========
 
+function getHeartbeatAge() {
+  try {
+    return Date.now() - fs.statSync(HUD_STDIN_FILE).mtimeMs
+  } catch {
+    return -1  // 文件不存在
+  }
+}
+
 function checkMainBusy() {
   try {
     const raw = fs.readFileSync(MAIN_BUSY_LOCK, 'utf8')
     const data = JSON.parse(raw)
     const ts = Number(data.ts || 0)
     if (Date.now() - ts > MAIN_BUSY_TTL_MS) {
-      logEvent(`BOT_WARN|poll.js|main-busy-lock-expired|ttl-${MAIN_BUSY_TTL_MS}ms|session=${data.session || 'unknown'}`)
-      try { fs.unlinkSync(MAIN_BUSY_LOCK) } catch {}
-      try { fs.unlinkSync(MAIN_BUSY_NOTIFIED_FLAG) } catch {}
-      return false
+      // 锁过期 → 查心跳区分「孤儿锁」vs「主会话卡死」
+      const heartbeatAge = getHeartbeatAge()
+      if (heartbeatAge >= 0 && heartbeatAge < MAIN_BUSY_HEARTBEAT_STALE_MS) {
+        // 心跳新鲜 → 会话存活，锁是孤儿（Stop 漏 fire/unlock 失败），安全清锁恢复 emit
+        logEvent(`BOT_WARN|poll.js|main-busy-lock-expired-orphan|ttl-${MAIN_BUSY_TTL_MS}ms|heartbeat-${Math.round(heartbeatAge / 1000)}s|session=${data.session || 'unknown'}`)
+        try { fs.unlinkSync(MAIN_BUSY_LOCK) } catch {}
+        try { fs.unlinkSync(MAIN_BUSY_NOTIFIED_FLAG) } catch {}
+        return false
+      }
+      // 心跳陈旧/缺失 → 主会话极可能卡死（AskUserQuestion 等阻塞交互），进入降级模式
+      logEvent(`BOT_ERROR|poll.js|main-busy-lock-expired-degraded|ttl-${MAIN_BUSY_TTL_MS}ms|heartbeat-${heartbeatAge < 0 ? 'missing' : Math.round(heartbeatAge / 1000) + 's'}|session=${data.session || 'unknown'}`)
+      return true  // 保持 busy，不 emit，持续发占位
     }
     return true
   } catch {
@@ -378,7 +399,12 @@ function checkMainBusy() {
 
 async function sendMainBusyPlaceholder() {
   try {
-    if (fs.existsSync(MAIN_BUSY_NOTIFIED_FLAG)) return
+    if (fs.existsSync(MAIN_BUSY_NOTIFIED_FLAG)) {
+      // 降级模式：flag 超过间隔后清除，下轮重发占位（避免长阻塞后期纯静默）
+      const flagAge = Date.now() - fs.statSync(MAIN_BUSY_NOTIFIED_FLAG).mtimeMs
+      if (flagAge < MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS) return
+      try { fs.unlinkSync(MAIN_BUSY_NOTIFIED_FLAG) } catch {}
+    }
   } catch { return }
   try {
     await adapter.sendText({ chatId: CHAT_ID, text: pickBusyPlaceholder() })
