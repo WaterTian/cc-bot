@@ -29,3 +29,6 @@ scripts/hooks/
 FEEDBACK-*.md
 FEEDBACK.md
 REGRESSION-*.md
+
+# 临时文档
+docs/
