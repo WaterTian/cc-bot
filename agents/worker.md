@@ -3,6 +3,7 @@ name: worker
 description: cc-bot 群任务执行 agent — 主会话消息调度派单时使用。执行群消息触发的项目任务（编译/部署/测试/改代码/研究/搜索），完成后按 IM 类型把结论发回群。
 tools: Read, Write, Edit, Bash, Glob, Grep, WebFetch, WebSearch
 model: inherit
+effort: auto
 ---
 
 # cc-bot worker
