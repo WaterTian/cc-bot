@@ -4,6 +4,14 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.16] - 2026-05-26
+
+- docs: 调度会话建议 low effort，worker 扛重活（issue #5）
+- feat: worker agent 设 effort: xhigh（官方编码/agentic 推荐起点，issue #5）
+- feat: worker agent 加 effort: auto 自适应推理深度（issue #5）
+- fix: busy 占位去重改为时间窗口，避免跨 turn 刷屏（issue #6）
+- chore: keywords 补 deepseek
+
 ## [0.1.15] - 2026-05-25
 
 - chore: gitignore docs/ 目录
