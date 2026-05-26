@@ -56,7 +56,7 @@ function lock() {
 function unlock() {
   if (!isCcBotProject()) return
   try { fs.unlinkSync(LOCK_FILE) } catch {}
-  try { fs.unlinkSync(NOTIFIED_FLAG) } catch {}
+  // NOTIFIED_FLAG 不再在此删除 — 占位去重由 poll.js 时间窗口（mtimeMs）接管，issue #6
 }
 
 const cmd = process.argv[2]

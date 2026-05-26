@@ -398,14 +398,12 @@ function checkMainBusy() {
 }
 
 async function sendMainBusyPlaceholder() {
+  // 时间窗口去重：mtimeMs 记录上次发占位的时刻，不依赖 lock/flag 生命周期（unlock 不再删此文件）。
+  // 跨 turn 密集主会话期间，5min 内绝不重发第二条占位，根治多 turn 刷屏问题（issue #6）。
   try {
-    if (fs.existsSync(MAIN_BUSY_NOTIFIED_FLAG)) {
-      // 降级模式：flag 超过间隔后清除，下轮重发占位（避免长阻塞后期纯静默）
-      const flagAge = Date.now() - fs.statSync(MAIN_BUSY_NOTIFIED_FLAG).mtimeMs
-      if (flagAge < MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS) return
-      try { fs.unlinkSync(MAIN_BUSY_NOTIFIED_FLAG) } catch {}
-    }
-  } catch { return }
+    const lastSent = fs.statSync(MAIN_BUSY_NOTIFIED_FLAG).mtimeMs
+    if (Date.now() - lastSent < MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS) return
+  } catch {}
   try {
     await adapter.sendText({ chatId: CHAT_ID, text: pickBusyPlaceholder() })
     fs.writeFileSync(MAIN_BUSY_NOTIFIED_FLAG, String(Date.now()))
