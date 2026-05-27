@@ -846,7 +846,7 @@ cc-hud 是独立 statusline **渲染器**（stdin JSON → stdout，不写文件
 **zh-CN**：
 ```
 Claude Code HUD
-CC: v2.1.112
+CC: v2.1.142
 模型: Opus 4.7 (1M context)
 上下文: ██░░░░░░░░ 13%  (130K / 1M)
 5h 额度: ██░░░░░░░░ 18% (剩 3.2h)
@@ -856,7 +856,7 @@ CC: v2.1.112
 **en-US**：
 ```
 Claude Code HUD
-CC: v2.1.112
+CC: v2.1.142
 Model: Opus 4.7 (1M context)
 Context: ██░░░░░░░░ 13%  (130K / 1M)
 5h limit: ██░░░░░░░░ 18% (3.2h left)
