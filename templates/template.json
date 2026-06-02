@@ -51,9 +51,6 @@
     "_comment": "项目特定意图：每个键是一个自然语言意图触发的动作描述。bot 识别群消息意图后按 profile.intents.<key> 描述执行。键名由你定，越具体越好。常见示例（按需复制，不需要的删掉）：\n- 'deploy': '用 bash scripts/deploy.sh 部署到生产'\n- 'run_tests': '跑 npm test 并汇报通过数 / 失败数'\n- 'query_logs': '用 mcp__cloudbase__logs 查最近 N 条错误日志'\n- 'compile_preview': '小程序场景：mcp__wechat-devtools__preview 出二维码，输出到 <paths.bot_temp_abs>/preview-qr.png，lark-cli +messages-send --image <paths.bot_temp_rel>/preview-qr.png'\n未列入的意图会被 bot 回「当前项目未配置该操作」"
   },
 
-  "_polling_mode_comment": "monitor（默认，Monitor 托管 poll.js，官方 Claude 推荐，无消息时零 token）| self-poll（/loop 驱动主会话每轮跑 poll.js --once，用于 DeepSeek 等弱 agentic 端点无法调用 Monitor 时；代价是持续轮询消耗 token，间隔越大越省）。缺省/缺字段 = monitor。",
-  "polling_mode": "monitor",
-  "polling_interval_ms": 30000,
   "self_poll_interval": "3m",
   "mcp_required": [],
   "notes": ""

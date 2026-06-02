@@ -364,6 +364,13 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
    - `project.root`: absolute path of current directory (forward slashes, e.g. `D:/Projects/foo`)
    - `paths.bot_temp_abs`: `{project.root}/.cc-bot/bot_temp` (forward slashes, e.g. `D:/Projects/foo/.cc-bot/bot_temp`)
    - `paths.bot_temp_rel`: `./.cc-bot/bot_temp` (相对路径；集中在 `.cc-bot/` 下避免污染项目根)
+
+   **检测 `polling_mode`**（在写 `active.json` 之前做）：
+   - 检查 `process.env.ANTHROPIC_BASE_URL`（CC 主会话暴露为 env，`node -e "console.log(process.env.ANTHROPIC_BASE_URL || '')"`）
+   - 若非空 **且** 不包含 `api.anthropic.com` → `POLLING_MODE = 'self-poll'`（第三方端点大概率调不动 Monitor，走 self-poll 兜底）
+   - 否则 → `POLLING_MODE = 'monitor'`（官方 Claude 默认；缺省也走此档）
+   - 写入 `active.json` 的 `polling_mode` 字段为 **POLLING_MODE**
+
    - Leave other fields (`tech_stack`, `intents`, `notes`) as-is from template — user can fill later as needed.
 
    **`IM_TYPE === 'lark'` 专属字段**：
@@ -548,6 +555,11 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
    最后统一追加：
    ```
    发送 /cc-bot:start 启动 bot（或在主会话说「开bot」）。
+   ```
+
+   **`POLLING_MODE === 'self-poll'`** 时再追加一行：
+   ```
+   ℹ️ polling_mode 已设为 self-poll — 检测到第三方 Anthropic 端点，绕开 Monitor 用 /loop 轮询。
    ```
 
 ## 幂等重入
