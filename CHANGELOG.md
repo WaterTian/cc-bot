@@ -4,6 +4,12 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.17] - 2026-06-02
+
+- feat: setup 自动检测第三方端点 → self-poll
+- docs: HUD 示例版本号更新到 v2.1.142
+- docs: 精简 poll-once.md，省 self-poll 每轮 token 开销
+
 ## [0.1.16] - 2026-05-26
 
 - docs: 调度会话建议 low effort，worker 扛重活（issue #5）
