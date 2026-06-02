@@ -572,6 +572,7 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
   - lark: `im.bot_app_id` 匹配 `/^cli_[a-z0-9]+$/` 且**不是** `cli_xxxxxxxxxxxx` 示例；`im.chat_id` 以 `oc_` 开头且长度 > 20
   - slack: `im.extra.bot_token` 匹配 `/^xoxb-/` 且 `im.bot_user_id` 匹配 `/^U[A-Z0-9]+$/`；`im.chat_id` 匹配 `/^C[A-Z0-9]+$/`
   - 判定为「已配置」→ 输出「已配置，可 /cc-bot:start」。**仍需复查**（共享，IM 无关）：
+    - 若 `active.json` 的 `polling_mode` 字段缺失或空 → 按 Stage E step 4 的检测逻辑（读 `ANTHROPIC_BASE_URL` env）补写（幂等，可重复）
     - 若 `settings.json` 的 `statusLine.command` 未指向 cc-bot shim → 跑步骤 7 补注册（幂等，可重复）
     - 若 `settings.json` 的 `hooks.UserPromptSubmit` / `hooks.Stop` 无 cc-bot main-busy 命令 → 跑步骤 8 补注册（幂等）
     - 若 `.claude/settings.local.json` 无 Monitor 通配权限规则 → 跑步骤 9 补注册（幂等）
