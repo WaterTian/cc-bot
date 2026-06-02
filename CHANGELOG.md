@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.18] - 2026-06-02
+
+- fix: setup 幂等重入路径补 polling_mode 复查
+
 ## [0.1.17] - 2026-06-02
 
 - feat: setup 自动检测第三方端点 → self-poll
