@@ -101,6 +101,7 @@ try {
 
 const CHAT_ID = im.chat_id
 const BOT_OPEN_ID = im.bot_open_id || im.bot_user_id || ''  // lark 用 bot_open_id / slack 用 bot_user_id；未配时保守 — 任何 @ 一律 skip
+const DEBUG = !!(im && im.debug)  // profile.im.debug=true 时启用 BOT_DEBUG 诊断日志
 // locale 决策：profile 显式优先 → 按 IM 类型默认（lark=zh-CN / slack=en-US）→ 兜底 zh-CN
 // 影响范围：bot 主动发起的系统文案（busy 占位 / 上下线通知）；不影响 LLM 跟用户对话的语言
 const DEFAULT_LOCALE_BY_IM = { lark: 'zh-CN', slack: 'en-US' }
@@ -121,6 +122,16 @@ const MAIN_BUSY_TTL_MS = 10 * 60 * 1000  // 10min 硬编码过期兜底
 const HUD_STDIN_FILE = path.join(RUNTIME_DIR, 'hud-stdin.json')
 const MAIN_BUSY_HEARTBEAT_STALE_MS = 5 * 60 * 1000  // 5min — statusline 无更新视为会话卡死
 const MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS = 5 * 60 * 1000  // 5min — 降级模式占位重发间隔
+
+// busy-held 持久化（v0.1.20，issue #9）：mainBusy 期间 held 的 msg id 落盘，下一 tick 绕过 lastTime 过滤直到 emit 成功。
+// 修复 #9 静默丢消息：旧路径靠"下一 tick 时 createTimeMs > lastTime"重 emit；若 main 通过 fetch-before-reply 越过 state，
+// held 消息就被 <= lastTime 过滤永久丢失。新路径用 in-memory map + JSON 文件持久化，emit 成功后才移除。
+const BUSY_HELD_FILE = path.join(RUNTIME_DIR, 'poll.busy-held')
+const BUSY_HELD_TTL_MS = 10 * 60 * 1000  // 10min 兜底清理（防孤儿）
+const busyHeld = new Map()  // id -> { ts }
+
+// debug 开关（v0.1.20，issue #9 诊断）：profile.im.debug=true 时每 tick 写 BOT_DEBUG 到 events.log
+// 帮排查"消息为啥没 emit"——列出 lastTime / msgs.length / 各过滤理由 / held 变化
 
 // 主会话忙碌时的群占位文案池（每次随机一条，避免机械重复）。
 // 按 locale 选池：zh-CN / en-US。两套都保留 emoji + 自嘲风格（cc-bot 是「群里的开发同事」人设）。
@@ -272,6 +283,43 @@ function logEvent(line) {
   try {
     fs.appendFileSync(EVENTS_LOG, `${new Date().toISOString()} ${line}\n`)
   } catch {}
+}
+
+function logDebug(line) {
+  if (!DEBUG) return
+  logEvent(`BOT_DEBUG|${line}`)
+}
+
+// ========== busy-held 持久化 helpers（v0.1.20）==========
+
+function loadBusyHeld() {
+  try {
+    const obj = JSON.parse(fs.readFileSync(BUSY_HELD_FILE, 'utf8'))
+    for (const [id, entry] of Object.entries(obj || {})) {
+      if (entry && typeof entry.ts === 'number') busyHeld.set(id, entry)
+    }
+  } catch {}
+}
+
+function persistBusyHeld() {
+  try {
+    fs.writeFileSync(BUSY_HELD_FILE, JSON.stringify(Object.fromEntries(busyHeld)))
+  } catch {}
+}
+
+function pruneBusyHeld() {
+  const cutoff = Date.now() - BUSY_HELD_TTL_MS
+  let pruned = 0
+  for (const [id, entry] of busyHeld) {
+    if (entry.ts < cutoff) {
+      busyHeld.delete(id)
+      pruned++
+    }
+  }
+  if (pruned > 0) {
+    logEvent(`BOT_WARN|poll.js|busy-held-pruned|${pruned} stale entries (>10min)`)
+    persistBusyHeld()
+  }
 }
 
 function checkStdoutTolerance() {
@@ -446,6 +494,7 @@ async function tick() {
 
   if (state.paused) return
 
+  pruneBusyHeld()
   const { busy: mainBusy, degraded, lockTs } = checkMainBusy()
 
   const msgs = await pollMessages()
@@ -456,7 +505,10 @@ async function tick() {
     }
     return
   }
-  if (msgs.length === 0) return
+  if (msgs.length === 0) {
+    logDebug(`tick|lastTime=${state.last_processed_time}|msgs=0|busy=${mainBusy}|held=${busyHeld.size}`)
+    return
+  }
 
   const lastTime = Number(state.last_processed_time || 0)
   const emitted = readEmitted()
@@ -464,31 +516,56 @@ async function tick() {
   const asc = [...msgs].reverse()
   const newlyEmitted = []
   let busySeenNew = false
+  let busyHeldDirty = false
+  // 过滤理由分布（debug 用）
+  const reasons = { id: 0, emitted: 0, bot: 0, type: 0, time: 0, atOthers: 0, held: 0, emitNow: 0, lateRelease: 0 }
 
   for (const m of asc) {
-    if (!m.id) continue
-    if (emitted.has(m.id)) continue
-    if (m.senderType === 'bot') continue
-    if (!VALID_TYPES.has(m.type)) continue
-    if (!m.createTimeMs || m.createTimeMs <= lastTime) continue
+    if (!m.id) { reasons.id++; continue }
+    if (emitted.has(m.id)) { reasons.emitted++; continue }
+    if (m.senderType === 'bot') { reasons.bot++; continue }
+    if (!VALID_TYPES.has(m.type)) { reasons.type++; continue }
+
+    // busy-held：在 hold 列表里的消息绕过 lastTime 过滤（issue #9）
+    const isHeld = busyHeld.has(m.id)
+    if (!isHeld && (!m.createTimeMs || m.createTimeMs <= lastTime)) { reasons.time++; continue }
 
     // @他人过滤：视为已处理（append emitted），下次不再扫
     if (isAtOthers(m.mentions)) {
+      reasons.atOthers++
       newlyEmitted.push(m.id)
+      if (isHeld) { busyHeld.delete(m.id); busyHeldDirty = true }
       continue
     }
 
     if (mainBusy) {
-      // 主窗口忙：不 emit、不记 emitted，等解锁后下一 tick 正常处理
+      // 主窗口忙：不 emit、不记 emitted；记 busy-held（持久化，下次绕过 time 过滤直到 emit 成功）
       busySeenNew = true
+      if (!isHeld) {
+        busyHeld.set(m.id, { ts: Date.now() })
+        busyHeldDirty = true
+        reasons.held++
+      }
       continue
     }
+
+    // busy 已退出 + 该消息曾被 held：emit 之；若 createTime < lastTime 说明 main 通过 fetch-before-reply 越过了 state，
+    // 重新 emit 可能导致主会话重复回复 — 写 BOT_WARN 让运维可见（main 端 SOP 应做 dedup，见 SKILL）
+    if (isHeld && m.createTimeMs <= lastTime) {
+      logEvent(`BOT_WARN|poll.js|busy-held-late-release|msg=${m.id}|ct=${m.createTimeMs}|lastTime=${lastTime}|main 可能已 fetch 处理过；重新 emit，需主会话端 dedup`)
+      reasons.lateRelease++
+    }
+
     console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}`)
     newlyEmitted.push(m.id)
+    reasons.emitNow++
+    if (isHeld) { busyHeld.delete(m.id); busyHeldDirty = true }
   }
 
+  if (busyHeldDirty) persistBusyHeld()
   if (mainBusy && busySeenNew) await sendMainBusyPlaceholder({ degraded, lockTs })
   if (newlyEmitted.length > 0) appendEmitted(newlyEmitted)
+  logDebug(`tick|lastTime=${lastTime}|msgs=${msgs.length}|busy=${mainBusy}|held=${busyHeld.size}|reasons=${JSON.stringify(reasons)}`)
 }
 
 // self-poll 单次模式：跑一次拉取，输出新消息到 stdout 后退出（由 /loop 每轮驱动，不依赖 Monitor）。
@@ -593,8 +670,9 @@ if (ONCE_MODE) {
     .then(() => process.exit(process.exitCode || 0))
     .catch((err) => { console.log(`BOT_ERROR|poll.js|once|${(err && err.message) || err}`); process.exit(1) })
 } else {
-  // 常驻模式（Monitor 托管）：与改动前逐字一致，零回归
+  // 常驻模式（Monitor 托管）
   acquireLock()
+  loadBusyHeld()  // v0.1.20：恢复上次未 emit 的 held 消息（issue #9）
   process.on('exit', releaseLock)
   process.on('SIGINT', () => { releaseLock(); process.exit(0) })
   process.on('SIGTERM', () => { releaseLock(); process.exit(0) })

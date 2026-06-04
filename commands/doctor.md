@@ -53,6 +53,20 @@ Execute checks in parallel where possible. Collect results, then print one unifi
       - 仍活 → ⚠ 确有另一实例（或 30s 内未自杀的孤儿）；按 `message` 字段指引处理
     - 注：成功 `/cc-bot:start` 后此文件由 poll.js acquireLock 自动清除；文件仍在 = 之后没有成功启动过
 - `state.last_processed_time`：若是数字且距今 > 24h 且 `paused=false` → ⚠ 提示 bot 可能长期未收到消息
+- `poll.busy-held`（v0.1.20+，issue #9）：
+  - 不存在 / 空对象 → ✓
+  - 存在 → 读出 entries 数量 + 最老条目年龄：
+    - 全部 < 10min → ℹ N 条 held 消息中（属正常 busy 窗口残留，下一 tick 会 emit）
+    - 任一 > 10min → ⚠ 陈旧 held 条目（poll.js 10min TTL 应自动清，若仍在说明 prune 没跑过；如确认无活 poll.js，建议 `rm .cc-bot/runtime/poll.busy-held`）
+
+### 3.5. polling_mode 漂移（v0.1.20+，issue #8）
+
+读 `process.env.ANTHROPIC_BASE_URL`（doctor 主会话同一进程的 env 即可），与 `profile.polling_mode` 比对：
+- env 含 `api.anthropic.com` 或未设 → `expected_mode = monitor`
+- 否则 → `expected_mode = self-poll`
+
+- `expected_mode === profile.polling_mode` → ✓
+- 不一致 → ⚠ 「profile = <profile.polling_mode>，env 探测建议 <expected_mode>。bot 会用 profile 的回路（self-poll 平均 1.5min 延迟 vs Monitor 即时 push），可能与端点不匹配。要切：编辑 .cc-bot/profiles/active.json 的 polling_mode → "<expected_mode>"，再 /cc-bot:stop + /cc-bot:start」
 
 ### 4. Zombie permissions (settings.local.json)
 

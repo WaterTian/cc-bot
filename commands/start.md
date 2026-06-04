@@ -13,6 +13,15 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
    - `.cc-bot/profiles/active.json`（拿 `im.chat_id`、`im.bot_app_id`、`project.root`、`paths.bot_temp_abs`、`polling_mode`、`self_poll_interval`）
    - `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`（拿 `version`，用于上线通知标题）
 
+1.5. **polling_mode 漂移检测**（v0.1.20，issue #8）：读 `process.env.ANTHROPIC_BASE_URL`，按 setup Stage E step 4 同样的逻辑算出 `expected_mode`（含 `api.anthropic.com` 或未设 → `monitor`；否则 → `self-poll`）。若 `expected_mode !== profile.polling_mode`，**在主会话打一行 ⚠ 警告，但不阻塞、不修改 profile**：
+
+   ```
+   ⚠ polling_mode 漂移：profile = <profile.polling_mode>，env 探测建议 <expected_mode>（ANTHROPIC_BASE_URL = <env 值或 "未设"，含 api.anthropic.com 判定为官方>）
+     本次按 profile 跑 <profile.polling_mode>。要切：编辑 .cc-bot/profiles/active.json 的 polling_mode 为 "<expected_mode>"，再 /cc-bot:stop + /cc-bot:start
+   ```
+
+   为何不直接覆盖：profile 是用户已确认的运行时配置，setup 主动改过的情况下 silent override 会让用户摸不着头脑。**警告 + 用户自决**最稳。
+
 2. **并行发起以下 5 个操作（同一响应的多 tool call）：**
    - Edit `.cc-bot/runtime/state.json`: `paused=false, monitor_task_id=null`
    - Bash: `mkdir -p <paths.bot_temp_abs>`（幂等）

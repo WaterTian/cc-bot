@@ -206,6 +206,7 @@ Bot is going to sleep — group messages won't be handled
 | `.cc-bot/runtime/agents.json` | 多 agent 调度 registry（running / queue；启动时空态，详见 §消息调度） |
 | `.cc-bot/runtime/main-busy.lock` | 主会话忙碌锁（CC UserPromptSubmit 写 / Stop 删；poll.js 读；10min 过期自动清，详见 §主会话优先级） |
 | `.cc-bot/runtime/main-busy-notified.flag` | 群占位消息全局节流时间戳（v0.1.16+：mtimeMs = 上次发占位时刻；与 lock 生命周期解耦，unlock 不再清；详见 §主会话优先级 占位策略） |
+| `.cc-bot/runtime/poll.busy-held` | busy 期间 hold 的 msg id（v0.1.20+，issue #9 修复）：JSON `{id: {ts}}`；主窗口忙时新消息进此表不 emit，下一 tick 绕过 lastTime 过滤直到 emit 成功；10min TTL 兜底清理 |
 | `.cc-bot/runtime/events.log` | 诊断日志（polling 架构下常规不写；破例写入场景：poll.js 连续 3 轮 stdout 不可写退出前 `BOT_ERROR`、`main-busy.lock` 过期 10min 自动清时 `BOT_WARN`） |
 
 ## 角色与权限
@@ -358,6 +359,12 @@ profile 未定义的意图 → 回"当前项目未配置该操作，请检查 pr
 **一次 fetch 覆盖多条**：Monitor 连发或前次 fetch ≤ 10s 内可复用结果。
 
 **升级到 fetch 10 条**：用户情绪激动（连发"？？？"）/ 连续 ACK 无回应 / 主会话刚跑完 ≥3min 工具链。宁可多 fetch，不要漏看。
+
+**state 推进纪律（v0.1.20，issue #9）**：fetch 拉到多条未处理消息时：
+- **必须按 `create_time` 升序逐条 reply**（用 `+messages-reply --message-id <每条 om_xxx>`），不允许把 N 条合并成一条总结回复
+- **每 reply 一条后立即推进 state.last_processed_time = 该条 ct**，逐条推；**严禁直接推到最新一条 ct 然后批量回**
+- 跳号推进的后果：poll.js 的 `busy-held` 已 hold 但未 emit 的消息会被 `<= lastTime` 过滤永久丢，群里看不到任何反馈 = bot 装看不见。v0.1.20 已在 poll.js 加 `busy-held` 持久化兜底（绕过 lastTime 过滤），但主会话端纪律仍是第一道防线
+- **NEW_MSG 去重**（v0.1.20 推论）：busy-held 释放时若 `ct < lastTime`，poll.js 会 emit 但写 `BOT_WARN|busy-held-late-release`。这种重复 emit 主会话需自行 dedup：fetch-before-reply 时若发现该 msg_id 在自己回复链上方（bot 已 reply 过），skip 不再回
 
 ### 最高优先级规则 3：bot 运行时禁用阻塞主会话的交互
 
@@ -601,9 +608,10 @@ subagent 完成时主会话收到自动通知（`run_in_background` 机制）。
 **主会话做什么**：什么都不用做。本机制完全由 poll.js + hook 脚本自主运转，不改 agents.json、不改 §消息调度 主流程。主会话只需知道：群消息静默不是丢了，是主窗口占用期间被主动延迟，Stop 后会补 emit。
 
 **关键不变式**：
-- 锁期间 poll.js **不 append poll.emitted**，否则解锁后消息会被去重跳过
+- 锁期间 poll.js **不 append poll.emitted**（v0.1.6+），改写 `poll.busy-held`（v0.1.20+）；解锁后下一 tick 从 `poll.busy-held` 重 emit，绕过 `<= lastTime` 过滤防主会话越过 state 时静默丢（issue #9）
 - `main-busy-notified.flag` 是**全局占位发送时间戳**（v0.1.16+），与 lock 生命周期解耦；`unlock` 不再删它（删了会导致下一次新 lock 立刻又发占位 → issue #6 多 turn 刷屏）。per-lock 去重独立用 `lockTs` 进程内变量
-- `state.last_processed_time` 只由主会话推进；poll.js 不动它
+- `state.last_processed_time` 只由主会话推进；poll.js 不动它（推进纪律见 §最高优先级规则 2）
+- `poll.busy-held` 释放 emit 时若 `ct <= lastTime`，poll.js 写 `BOT_WARN|busy-held-late-release`，表示主会话可能已通过 fetch-before-reply 处理过；重复 emit 由主会话端 dedup（见 §最高优先级规则 2 "NEW_MSG 去重"）
 
 **测试 caveat**：`!` 前缀 bash 命令 UserPromptSubmit / Stop 毫秒级 fire，跨不了 poll tick（30s），会漏测。测本机制用真实 Claude prompt（≥30s 输出）。
 
