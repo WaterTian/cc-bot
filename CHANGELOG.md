@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.20] - 2026-06-04
+
+- fix: poll.js busy-held 持久化 + polling_mode 漂移警告 + im.debug 开关（issue #8 #9）
+
 ## [0.1.19] - 2026-06-04
 
 - fix: busy 占位 per-lock 去重 + opt-out 开关（issue #7）
