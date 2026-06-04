@@ -198,6 +198,10 @@ function pickBusyPlaceholder() {
 let consecutiveFailures = 0
 let alertedOnce = false
 
+// 进程内状态：上次发占位对应的 lock.ts。用于普通态 per-lock dedup（issue #7：长 lock + 持续新消息时严格 5min 周期发占位刷屏）。
+// 不落盘：poll.js 重启后首条消息按"全新"处理，行为可预期；也少一个跨进程同步坑。
+let lastLockTsPlaceholdered = 0
+
 // ========== Defense 1: PID lockfile 单例锁 ==========
 
 function pidAlive(pid) {
@@ -372,38 +376,59 @@ function getHeartbeatAge() {
   }
 }
 
+// 返回 { busy, degraded, lockTs }：
+//   busy     — 主会话忙否（true 时 poll.js 不 emit 普通消息）
+//   degraded — 是否进入降级模式（lock 过期 + 心跳陈旧，主会话疑似卡死如 AskUserQuestion）
+//   lockTs   — 当前 lock 的 acquire ts（main-busy.js lock 时写入），用于普通态 per-lock dedup
 function checkMainBusy() {
+  let data
   try {
-    const raw = fs.readFileSync(MAIN_BUSY_LOCK, 'utf8')
-    const data = JSON.parse(raw)
-    const ts = Number(data.ts || 0)
-    if (Date.now() - ts > MAIN_BUSY_TTL_MS) {
-      // 锁过期 → 查心跳区分「孤儿锁」vs「主会话卡死」
-      const heartbeatAge = getHeartbeatAge()
-      if (heartbeatAge >= 0 && heartbeatAge < MAIN_BUSY_HEARTBEAT_STALE_MS) {
-        // 心跳新鲜 → 会话存活，锁是孤儿（Stop 漏 fire/unlock 失败），安全清锁恢复 emit
-        logEvent(`BOT_WARN|poll.js|main-busy-lock-expired-orphan|ttl-${MAIN_BUSY_TTL_MS}ms|heartbeat-${Math.round(heartbeatAge / 1000)}s|session=${data.session || 'unknown'}`)
-        try { fs.unlinkSync(MAIN_BUSY_LOCK) } catch {}
-        try { fs.unlinkSync(MAIN_BUSY_NOTIFIED_FLAG) } catch {}
-        return false
-      }
-      // 心跳陈旧/缺失 → 主会话极可能卡死（AskUserQuestion 等阻塞交互），进入降级模式
-      logEvent(`BOT_ERROR|poll.js|main-busy-lock-expired-degraded|ttl-${MAIN_BUSY_TTL_MS}ms|heartbeat-${heartbeatAge < 0 ? 'missing' : Math.round(heartbeatAge / 1000) + 's'}|session=${data.session || 'unknown'}`)
-      return true  // 保持 busy，不 emit，持续发占位
-    }
-    return true
+    data = JSON.parse(fs.readFileSync(MAIN_BUSY_LOCK, 'utf8'))
   } catch {
-    return false
+    return { busy: false, degraded: false, lockTs: 0 }
   }
+  const ts = Number(data.ts || 0)
+  if (Date.now() - ts > MAIN_BUSY_TTL_MS) {
+    // 锁过期 → 查心跳区分「孤儿锁」vs「主会话卡死」
+    const heartbeatAge = getHeartbeatAge()
+    if (heartbeatAge >= 0 && heartbeatAge < MAIN_BUSY_HEARTBEAT_STALE_MS) {
+      // 心跳新鲜 → 会话存活，锁是孤儿（Stop 漏 fire/unlock 失败），安全清锁恢复 emit
+      logEvent(`BOT_WARN|poll.js|main-busy-lock-expired-orphan|ttl-${MAIN_BUSY_TTL_MS}ms|heartbeat-${Math.round(heartbeatAge / 1000)}s|session=${data.session || 'unknown'}`)
+      try { fs.unlinkSync(MAIN_BUSY_LOCK) } catch {}
+      try { fs.unlinkSync(MAIN_BUSY_NOTIFIED_FLAG) } catch {}
+      return { busy: false, degraded: false, lockTs: 0 }
+    }
+    // 心跳陈旧/缺失 → 主会话极可能卡死（AskUserQuestion 等阻塞交互），进入降级模式
+    logEvent(`BOT_ERROR|poll.js|main-busy-lock-expired-degraded|ttl-${MAIN_BUSY_TTL_MS}ms|heartbeat-${heartbeatAge < 0 ? 'missing' : Math.round(heartbeatAge / 1000) + 's'}|session=${data.session || 'unknown'}`)
+    return { busy: true, degraded: true, lockTs: ts }
+  }
+  return { busy: true, degraded: false, lockTs: ts }
 }
 
-async function sendMainBusyPlaceholder() {
-  // 时间窗口去重：mtimeMs 记录上次发占位的时刻，不依赖 lock/flag 生命周期（unlock 不再删此文件）。
-  // 跨 turn 密集主会话期间，5min 内绝不重发第二条占位，根治多 turn 刷屏问题（issue #6）。
-  try {
-    const lastSent = fs.statSync(MAIN_BUSY_NOTIFIED_FLAG).mtimeMs
-    if (Date.now() - lastSent < MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS) return
-  } catch {}
+// 占位发送策略（issue #7 引入分层语义，issue #6/#1 兼顾）：
+//   ① profile.im.busy_placeholder === false → 全关 opt-out
+//   ② degraded（主会话疑似卡死）→ 5min 周期心跳，避免长阻塞后期纯静默（v0.1.15 设计）
+//   ③ 普通忙碌 → per-lock dedup：同一 lock acquisition 至多发 1 条
+//      + 全局 5min 节流兜底，防 hook 高频 lock churn（#6 多 turn 密集）击穿 per-lock dedup
+async function sendMainBusyPlaceholder({ degraded = false, lockTs = 0 } = {}) {
+  if (profile && profile.im && profile.im.busy_placeholder === false) return
+
+  if (degraded) {
+    try {
+      const lastSent = fs.statSync(MAIN_BUSY_NOTIFIED_FLAG).mtimeMs
+      if (Date.now() - lastSent < MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS) return
+    } catch {}
+  } else {
+    // per-lock dedup：lockTs 相同视为同一 lock acquisition，已发过就不再发（issue #7 根治）
+    if (lockTs > 0 && lockTs === lastLockTsPlaceholdered) return
+    // 全局节流：跨 lock 也限速 5min（issue #6 防多 turn 高频）
+    try {
+      const lastSent = fs.statSync(MAIN_BUSY_NOTIFIED_FLAG).mtimeMs
+      if (Date.now() - lastSent < MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS) return
+    } catch {}
+    lastLockTsPlaceholdered = lockTs
+  }
+
   try {
     await adapter.sendText({ chatId: CHAT_ID, text: pickBusyPlaceholder() })
     fs.writeFileSync(MAIN_BUSY_NOTIFIED_FLAG, String(Date.now()))
@@ -421,7 +446,7 @@ async function tick() {
 
   if (state.paused) return
 
-  const mainBusy = checkMainBusy()
+  const { busy: mainBusy, degraded, lockTs } = checkMainBusy()
 
   const msgs = await pollMessages()
   if (msgs === null) {
@@ -462,7 +487,7 @@ async function tick() {
     newlyEmitted.push(m.id)
   }
 
-  if (mainBusy && busySeenNew) await sendMainBusyPlaceholder()
+  if (mainBusy && busySeenNew) await sendMainBusyPlaceholder({ degraded, lockTs })
   if (newlyEmitted.length > 0) appendEmitted(newlyEmitted)
 }
 
@@ -513,7 +538,7 @@ async function handlePushMessage(m) {
   state = guardFutureTime(state)
   if (state.paused) return
 
-  const mainBusy = checkMainBusy()
+  const { busy: mainBusy, degraded, lockTs } = checkMainBusy()
   const lastTime = Number(state.last_processed_time || 0)
   const emitted = readEmitted()
 
@@ -531,10 +556,10 @@ async function handlePushMessage(m) {
   if (mainBusy) {
     // push 模式必须立刻 emit — 没有"下一 tick 重新 fetch"机制，错过 push 永久丢失。
     // 主会话忙时 CC 会自动把 notification 排队，忙完按顺序处理 → 消息不丢 + 不打断主会话节奏。
-    // busy 占位仍只发一次（sendMainBusyPlaceholder 内部有 NOTIFIED_FLAG 去重）防刷屏。
+    // busy 占位由 sendMainBusyPlaceholder 内部做 per-lock + 全局节流去重，不会刷屏。
     console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}`)
     appendEmitted([m.id])
-    await sendMainBusyPlaceholder()
+    await sendMainBusyPlaceholder({ degraded, lockTs })
     return
   }
 

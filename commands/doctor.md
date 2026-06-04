@@ -92,6 +92,9 @@ Execute checks in parallel where possible. Collect results, then print one unifi
   - 不存在 → ℹ 主窗口空闲
   - 存在且 ts 距今 < 10min → ℹ 主窗口忙碌中
   - 存在且 ts 距今 > 10min → ⚠ 锁过期未清理（poll.js 下轮应自动清 + 写 events.log 告警，若仍在 → 检查 poll.js 是否在跑）
+- 占位消息开关（v0.1.19+）：读 `profile.im.busy_placeholder`：
+  - `true` 或缺失 → ℹ 占位已启用（per-lock 去重 + 5min 全局节流；降级心跳保留）
+  - `false` → ℹ 占位已关闭（主会话忙碌时群里不再发占位；卡死场景也不会发降级心跳，需自己监 events.log）
 
 ### 6. lark-cli
 

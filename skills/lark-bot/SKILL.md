@@ -205,7 +205,7 @@ Bot is going to sleep — group messages won't be handled
 | `.cc-bot/runtime/hud-stdin.json` | HUD 数据（cc-hud 写入） |
 | `.cc-bot/runtime/agents.json` | 多 agent 调度 registry（running / queue；启动时空态，详见 §消息调度） |
 | `.cc-bot/runtime/main-busy.lock` | 主会话忙碌锁（CC UserPromptSubmit 写 / Stop 删；poll.js 读；10min 过期自动清，详见 §主会话优先级） |
-| `.cc-bot/runtime/main-busy-notified.flag` | 同锁周期内群占位消息只发一次的节流标记（unlock 时清） |
+| `.cc-bot/runtime/main-busy-notified.flag` | 群占位消息全局节流时间戳（v0.1.16+：mtimeMs = 上次发占位时刻；与 lock 生命周期解耦，unlock 不再清；详见 §主会话优先级 占位策略） |
 | `.cc-bot/runtime/events.log` | 诊断日志（polling 架构下常规不写；破例写入场景：poll.js 连续 3 轮 stdout 不可写退出前 `BOT_ERROR`、`main-busy.lock` 过期 10min 自动清时 `BOT_WARN`） |
 
 ## 角色与权限
@@ -583,13 +583,18 @@ subagent 完成时主会话收到自动通知（`run_in_background` 机制）。
 1. CC hook 注册在 `~/.claude/settings.json`（由 `/cc-bot:setup` step 9 幂等注入）：
    - `UserPromptSubmit` → `node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js lock` 写 `.cc-bot/runtime/main-busy.lock`
    - `Stop` → `node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js unlock` 删锁 + 删通知标志
-2. poll.js 每 tick 开头 `checkMainBusy()`：
-   - 锁存在 + 未过期 → **仍 fetch 但不 emit**（消息不进主会话事件队列）；首次见到新消息发群占位（30 条文案池随机一条）+ 写 `main-busy-notified.flag` 同锁周期内静默
+2. poll.js 每 tick 开头 `checkMainBusy()` 返回 `{ busy, degraded, lockTs }`：
+   - 锁存在 + 未过期 → **仍 fetch 但不 emit**（消息不进主会话事件队列）；按下方占位策略决定是否发占位
    - 锁存在 + 过期（> 10min）→ 查 `hud-stdin.json` 心跳：
 	     - 心跳新鲜（< 5min）→ **孤儿锁**（Stop 漏 fire 或 unlock 失败），安全清锁 + 恢复 emit；写 `events.log` `BOT_WARN|main-busy-lock-expired-orphan`
-	     - 心跳陈旧/缺失 → **降级模式**（主会话极可能卡在 `AskUserQuestion` 等阻塞交互）：锁不删、不 emit、保持 busy，继续每 5min 发占位；写 `events.log` `BOT_ERROR|main-busy-lock-expired-degraded`。Stop 触发后正常解锁恢复
+	     - 心跳陈旧/缺失 → **降级模式**（主会话极可能卡在 `AskUserQuestion` 等阻塞交互）：锁不删、不 emit、保持 busy（`degraded=true`）；写 `events.log` `BOT_ERROR|main-busy-lock-expired-degraded`。Stop 触发后正常解锁恢复
    - 锁不存在 → 正常 emit NEW_MSG
-3. 主会话响应完（Stop）→ 锁 + flag 同时删 → 下一 tick（≤ 30s）恢复正常 fetch，积压消息通过 `poll.emitted` 去重机制补 emit，不会丢
+
+   **占位策略**（v0.1.19+，分层语义，issue #6 #7 一并解）：
+   - `profile.im.busy_placeholder === false` → 全关 opt-out（普通态 + 降级态都不发）
+   - **普通忙碌**：`per-lock dedup` — 同一 lock acquisition（同 `lockTs`）至多发 1 条；外加 5min 全局节流兜底，防 hook 高频 lock churn（多 turn 密集时 issue #6 的场景）击穿 per-lock dedup
+   - **降级模式**：5min 周期心跳续发，保留卡死场景的"还活着"信号（v0.1.15 设计，issue #1）
+3. 主会话响应完（Stop）→ 锁删除 → 下一 tick（≤ 30s）恢复正常 fetch，积压消息通过 `poll.emitted` 去重机制补 emit，不会丢
 
 **为何 hook 走 `~/.claude/settings.json` 而不是 plugin `hooks.json`**：CC bug #10225 — plugin 声明的 `UserPromptSubmit` hook 完全不 fire。`main-busy.js` 自带"非 cc-bot 项目 silent skip"（检查 `.cc-bot/` 存在），全局注册对其他项目无副作用。
 
@@ -597,7 +602,7 @@ subagent 完成时主会话收到自动通知（`run_in_background` 机制）。
 
 **关键不变式**：
 - 锁期间 poll.js **不 append poll.emitted**，否则解锁后消息会被去重跳过
-- 占位 flag 仅在锁周期内有效，`unlock` 调用时一并删
+- `main-busy-notified.flag` 是**全局占位发送时间戳**（v0.1.16+），与 lock 生命周期解耦；`unlock` 不再删它（删了会导致下一次新 lock 立刻又发占位 → issue #6 多 turn 刷屏）。per-lock 去重独立用 `lockTs` 进程内变量
 - `state.last_processed_time` 只由主会话推进；poll.js 不动它
 
 **测试 caveat**：`!` 前缀 bash 命令 UserPromptSubmit / Stop 毫秒级 fire，跨不了 poll tick（30s），会漏测。测本机制用真实 Claude prompt（≥30s 输出）。

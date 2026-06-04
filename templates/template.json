@@ -6,9 +6,10 @@
   "description": "项目一句话描述（可选）",
 
   "im": {
-    "_comment": "type 决定用哪个 adapter：lark | slack。locale 影响 bot 系统级文案（上下线通知 / busy 占位）的语言，缺省按 type 走：lark=zh-CN / slack=en-US；LLM 跟用户对话的语言不受此影响（跟随用户消息）。\n\n— lark 字段：bot_app_id (cli_xxx) / bot_open_id (ou_xxx，选填，配了能精准识别 @bot；未配=任何 @ 一律不响应) / chat_id (oc_xxx)\n— slack 字段：bot_user_id (U0xxx) / chat_id (C0xxx) / extra.bot_token (xoxb-...) / extra.app_token (xapp-1-...，Socket Mode 必需 scope connections:write)",
+    "_comment": "type 决定用哪个 adapter：lark | slack。locale 影响 bot 系统级文案（上下线通知 / busy 占位）的语言，缺省按 type 走：lark=zh-CN / slack=en-US；LLM 跟用户对话的语言不受此影响（跟随用户消息）。\n\n— lark 字段：bot_app_id (cli_xxx) / bot_open_id (ou_xxx，选填，配了能精准识别 @bot；未配=任何 @ 一律不响应) / chat_id (oc_xxx)\n— slack 字段：bot_user_id (U0xxx) / chat_id (C0xxx) / extra.bot_token (xoxb-...) / extra.app_token (xapp-1-...，Socket Mode 必需 scope connections:write)\n— busy_placeholder (可选，缺省 true)：主会话忙碌时是否向群发占位消息。设 false 完全关闭（包括 AskUserQuestion 卡死场景的 5min 降级心跳）。觉得占位刷屏 → 设 false；想保留卡死告警 → 留 true（v0.1.19+ 已按 per-lock 去重，长任务最多 1 条）",
     "type": "lark",
     "locale": "",
+    "busy_placeholder": true,
     "bot_app_id": "cli_xxxxxxxxxxxx",
     "bot_open_id": "",
     "chat_id": "oc_xxxxxxxxxxxx",
@@ -16,6 +17,7 @@
     "_slack_example": {
       "type": "slack",
       "locale": "",
+      "busy_placeholder": true,
       "bot_user_id": "U0XXXXXXXXX",
       "chat_id": "C0XXXXXXXXX",
       "chat_name": "channel-name",
