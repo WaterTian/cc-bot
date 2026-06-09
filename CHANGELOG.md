@@ -4,6 +4,12 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.21] - 2026-06-09
+
+- chore(doctor): §2 schema drift 名单加 busy_reaction
+- feat: main-busy 期间 emoji reaction ack 信号（issue #12）
+- docs(doctor): §2 schema drift 扫顶级误写 IM 字段（issue #11）
+
 ## [0.1.20] - 2026-06-04
 
 - fix: poll.js busy-held 持久化 + polling_mode 漂移警告 + im.debug 开关（issue #8 #9）
