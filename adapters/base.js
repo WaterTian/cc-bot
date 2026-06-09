@@ -84,6 +84,25 @@ class IMAdapter {
   }
 
   /**
+   * 给消息打 emoji reaction（用于 main-busy 期间的轻量 "我看见了" ack）。
+   *
+   * 失败语义：**返回 {ok:false, reason} 而非抛错**。这是一个装饰性增强通道，
+   * 任何失败（缺 scope / 网络抖动 / 平台限流）都不应中断 poll.js 主流程。
+   * 默认实现返回 {ok:false, reason:'not-implemented'}，未实现的 adapter 自动 no-op。
+   *
+   * emoji 取值由平台决定，不跨平台归一：
+   *   - lark: 飞书 emoji_type 枚举字符串（如 'HEY' / 'SMILE' / 'OK'）
+   *   - slack: Slack reaction name（如 'eyes' / 'white_check_mark'）
+   *
+   * @param {{messageId: string, emoji: string, chatId?: string}} opts
+   *   chatId 仅 slack 必传（reactions.add 需要 channel + ts 二元组）；lark 不用
+   * @returns {Promise<{ok: boolean, reactionId?: string, reason?: string}>}
+   */
+  async addReaction(opts) {
+    return { ok: false, reason: 'not-implemented' }
+  }
+
+  /**
    * Push 模式监听消息（Socket Mode / WebSocket 推送）。仅 push 类 IM 实现，
    * polling 类 IM（lark）不实现，由 poll.js 走 listRecentMessages 拉取。
    *

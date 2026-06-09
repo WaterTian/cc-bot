@@ -130,6 +130,28 @@ const BUSY_HELD_FILE = path.join(RUNTIME_DIR, 'poll.busy-held')
 const BUSY_HELD_TTL_MS = 10 * 60 * 1000  // 10min 兜底清理（防孤儿）
 const busyHeld = new Map()  // id -> { ts }
 
+// reaction ack（v0.1.21，issue #12）：mainBusy 期间每条新消息打 emoji reaction 作为"看见了"信号。
+// 仅装饰性增强 — 任何失败不影响 emit / busy-held / 文本占位。`busy_reaction: false` 完全 opt-out。
+const REACTED_FILE = path.join(RUNTIME_DIR, 'poll.reacted')
+const REACTED_MAX = 200
+// 默认 emoji：lark='WAVE'（👋 招手）= 我看见了；slack='eyes'（👀）= 我注意到了。
+// lark 合法 emoji_type 枚举见 https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message-reaction/emojis-introduce
+// 常用枚举：WAVE / SMILE / OK / THUMBSUP / HEART / LAUGH（'HEY' 非合法值，API 报 231001 reaction type is invalid）
+const DEFAULT_REACTION_BY_IM = { lark: 'WAVE', slack: 'eyes' }
+// 解析配置：
+//   显式 false / 'false' → 关闭（opt-out）
+//   非空字符串 → 用作 emoji key
+//   undefined / null / "" → 按 IM 默认（lark='WAVE' / slack='eyes'，与 `locale` 字段同语义）
+function resolveBusyReaction() {
+  const v = im.busy_reaction
+  if (v === false || v === 'false') return null
+  if (typeof v === 'string' && v.trim()) return v.trim()
+  return DEFAULT_REACTION_BY_IM[im.type] || null
+}
+const BUSY_REACTION = resolveBusyReaction()
+const reacted = new Set()  // msg ids already reacted to this lifetime
+let reactionScopeMissingLogged = false  // BOT_WARN 仅首次记一次，避免污染日志
+
 // debug 开关（v0.1.20，issue #9 诊断）：profile.im.debug=true 时每 tick 写 BOT_DEBUG 到 events.log
 // 帮排查"消息为啥没 emit"——列出 lastTime / msgs.length / 各过滤理由 / held 变化
 
@@ -319,6 +341,50 @@ function pruneBusyHeld() {
   if (pruned > 0) {
     logEvent(`BOT_WARN|poll.js|busy-held-pruned|${pruned} stale entries (>10min)`)
     persistBusyHeld()
+  }
+}
+
+// ========== reaction ack helpers（v0.1.21，issue #12）==========
+
+function loadReacted() {
+  try {
+    const lines = fs.readFileSync(REACTED_FILE, 'utf8').split('\n').filter(Boolean)
+    for (const id of lines) reacted.add(id)
+  } catch {}
+}
+
+function persistReacted(newId) {
+  try {
+    fs.appendFileSync(REACTED_FILE, newId + '\n')
+    const lines = fs.readFileSync(REACTED_FILE, 'utf8').split('\n').filter(Boolean)
+    if (lines.length > REACTED_MAX) {
+      fs.writeFileSync(REACTED_FILE, lines.slice(-REACTED_MAX).join('\n') + '\n')
+    }
+  } catch {}
+}
+
+// 装饰性 — 任何失败都不应抛、不应阻塞主流程。
+// 三层兜底：① BUSY_REACTION=null 直接 no-op ② 已 react 过 skip ③ adapter 返 {ok:false} BOT_WARN 不再重试
+async function tryReactBusy(m) {
+  if (!BUSY_REACTION) return
+  if (!m || !m.id) return
+  if (reacted.has(m.id)) return
+  try {
+    const r = await adapter.addReaction({
+      messageId: m.id,
+      emoji: BUSY_REACTION,
+      chatId: CHAT_ID,  // slack 需要；lark 忽略
+    })
+    if (r && r.ok) {
+      reacted.add(m.id)
+      persistReacted(m.id)
+    } else if (r && r.reason && !reactionScopeMissingLogged) {
+      // 仅首次失败写日志（缺 scope / 命令不支持 等典型一次性失败），避免每 tick 刷 events.log
+      logEvent(`BOT_WARN|poll.js|reaction-failed|${m.id}|${r.reason}|后续不再记录此类失败本生命周期`)
+      reactionScopeMissingLogged = true
+    }
+  } catch {
+    // adapter 实现按约定不抛，但加 belt-and-suspenders 兜底
   }
 }
 
@@ -545,6 +611,8 @@ async function tick() {
         busyHeld.set(m.id, { ts: Date.now() })
         busyHeldDirty = true
         reasons.held++
+        // reaction ack — 装饰性，失败不影响 hold/emit 链路（issue #12）
+        await tryReactBusy(m)
       }
       continue
     }
@@ -636,6 +704,8 @@ async function handlePushMessage(m) {
     // busy 占位由 sendMainBusyPlaceholder 内部做 per-lock + 全局节流去重，不会刷屏。
     console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}`)
     appendEmitted([m.id])
+    // reaction ack — 装饰性，与 emit/占位并列，失败不影响主链路（issue #12）
+    await tryReactBusy(m)
     await sendMainBusyPlaceholder({ degraded, lockTs })
     return
   }
@@ -673,6 +743,7 @@ if (ONCE_MODE) {
   // 常驻模式（Monitor 托管）
   acquireLock()
   loadBusyHeld()  // v0.1.20：恢复上次未 emit 的 held 消息（issue #9）
+  loadReacted()   // v0.1.21：恢复上次已打 reaction 的 msg id 集合（issue #12，防重打）
   process.on('exit', releaseLock)
   process.on('SIGINT', () => { releaseLock(); process.exit(0) })
   process.on('SIGTERM', () => { releaseLock(); process.exit(0) })

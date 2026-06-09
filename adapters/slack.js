@@ -226,6 +226,27 @@ class SlackAdapter extends IMAdapter {
     }
   }
 
+  // 给消息打 emoji reaction（issue #12 ack 信号）。失败返 {ok:false,reason} 不抛 —
+  // poll.js 视作装饰性增强，任何失败（缺 reactions:write scope / 限流）静默降级不影响 emit。
+  // chatId 必传：Slack reactions.add 需要 (channel, timestamp) 二元组。
+  async addReaction({ messageId, emoji, chatId } = {}) {
+    if (!messageId || !emoji || !chatId) return { ok: false, reason: 'missing-params' }
+    try {
+      const res = await this._web.reactions.add({
+        channel: chatId,
+        timestamp: String(messageId),
+        name: String(emoji),
+      })
+      if (!res.ok) return { ok: false, reason: res.error || 'unknown' }
+      return { ok: true }
+    } catch (err) {
+      // already_reacted：bot 已经 react 过同 emoji，视作成功（幂等语义）
+      const code = err && (err.data && err.data.error || err.code || err.message) || ''
+      if (String(code).includes('already_reacted')) return { ok: true }
+      return { ok: false, reason: String(code).slice(0, 200) }
+    }
+  }
+
   // Push 模式核心 — Socket Mode 接事件，归一化后调 onMessage。
   // SDK 内部处理 disconnect/refresh_requested + 自动重连，断流彻底无法自愈才走 onError。
   async startListening({ chatId, onMessage, onError } = {}) {

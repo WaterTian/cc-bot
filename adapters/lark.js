@@ -145,6 +145,31 @@ class LarkAdapter extends IMAdapter {
     return { path: path.resolve(output) }
   }
 
+  // 给消息打 emoji reaction（issue #12 ack 信号）。失败返 {ok:false,reason} 不抛 —
+  // poll.js 视作装饰性增强，任何失败（缺 scope / lark-cli 抖动）静默降级不影响 emit。
+  async addReaction({ messageId, emoji }) {
+    if (!messageId || !emoji) return { ok: false, reason: 'missing-params' }
+    try {
+      const params = JSON.stringify({ message_id: messageId })
+      const data = JSON.stringify({ reaction_type: { emoji_type: String(emoji) } })
+      const out = this._run([
+        'im', 'reactions', 'create',
+        '--as', 'bot',
+        '--params', params,
+        '--data', data,
+      ], { timeout: 10 * 1000 })
+      const json = this._parseJson(out)
+      const reactionId = (json && json.data && json.data.reaction_id) || ''
+      // lark-cli 顶层有 code 字段，非 0 视为业务失败（如 emoji_type 非法 / scope 缺）
+      if (json && typeof json.code === 'number' && json.code !== 0) {
+        return { ok: false, reason: `lark-code-${json.code}` }
+      }
+      return { ok: true, reactionId }
+    } catch (err) {
+      return { ok: false, reason: (err && err.message || String(err)).slice(0, 200) }
+    }
+  }
+
   async getUser({ userId }) {
     if (!userId) throw new Error('getUser: userId required')
     const out = this._run(['contact', '+get-user', '--as', 'user', '--user-id', userId])

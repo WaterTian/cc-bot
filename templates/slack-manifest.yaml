@@ -31,6 +31,7 @@ oauth_config:
       - files:write         # 上传图片
       - groups:history      # 读 private channel 历史
       - groups:read         # 列 private channel
+      - reactions:write     # 主会话忙时给用户消息打 👀 ack（v0.1.21+ issue #12，老装可不加；不加 addReaction 静默失败）
       - users:read          # 查用户信息（取代飞书 getUser）
 
 settings:
