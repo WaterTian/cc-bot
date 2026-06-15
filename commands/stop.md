@@ -30,17 +30,17 @@ Steps:
    ```
    默认发主流（跟飞书对齐，Slack 不进 thread）。
 
-   **下线模板**（按 `im.locale` 选）—— 下线通知**不含版本行 / 模型行**（与上线通知不同）：
+   **下线模板**（按 `im.locale` 选）—— 不含版本/模型/休眠提示行：
 
    HUD 可用（含上下文行）：
-   - `zh-CN`：`"已下线\n上下文: {bar} {x}% ({used} / {total})\n\nBot 进入休眠，群消息将不再响应"`
-   - `en-US`：`"Offline\nContext: {bar} {x}% ({used} / {total})\n\nBot is going to sleep — group messages won't be handled"`
+   - `zh-CN`：`"○ 已下线\n上下文 · {bar} {x}%"`
+   - `en-US`：`"○ Offline\nContext · {bar} {x}%"`
 
    HUD 不可用（拿不到上下文，省略上下文行）：
-   - `zh-CN`：`"已下线\n\nBot 进入休眠，群消息将不再响应"`
-   - `en-US`：`"Offline\n\nBot is going to sleep — group messages won't be handled"`
+   - `zh-CN`：`"○ 已下线"`
+   - `en-US`：`"○ Offline"`
 
-   `{bar}` / `{x}` / `{used}` / `{total}` 字段来源见 SKILL.md §开关通知。
+   `{bar}` / `{x}` 字段来源见 SKILL.md §开关通知。
 6. Verify no residual `poll.js` process matches the project — **按平台选命令**：
 
    **Windows**（Git Bash）：

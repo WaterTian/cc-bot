@@ -64,46 +64,70 @@ function execLark(args, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
 
 // === card schema ===
 
-function buildCard({ content, streaming, summary, terminal }) {
+function buildCard({ content, streaming, summary, terminal, elapsedMs }) {
   const text = (content && content.trim()) ? truncate(content, MAX_CONTENT_CHARS) : '🧠 思考中...'
   const config = {
     streaming_mode: !!streaming,
     summary: { content: summary || (streaming ? '思考中...' : '已完成') },
+    wide_screen_mode: true,
   }
   if (streaming) {
-    // streaming_config 控制 typewriter 节奏；不写也能跑（用 Feishu 默认 70ms/1），
-    // 显式写出来后可调速。print_strategy: 'fast' = 未打完瞬切到新内容；'delay' = 续打完旧文本再上新。
+    // streaming_config 控制 typewriter 节奏。print_strategy: 'fast' = 未打完瞬切到新内容；'delay' = 续打完旧文本再上新。
     config.streaming_config = {
       print_frequency_ms: { default: 60 },
       print_step: { default: 4 },
       print_strategy: 'fast',
     }
   }
-  // Header：template 大色条 + 极简标题 + unicode 几何字符。
+  // Header：template 色条 + 极简标题 + unicode 几何字符。
   //   running → blue   · "● 处理中"
   //   done    → green  · "✓ 已完成"
   //   error   → red    · "✕ 失败"
-  // 不用 standard_icon（token catalog 不稳定，实测不渲染），unicode 字符保证 100% 显示。
   const template = terminal === 'error' ? 'red' : terminal === 'done' ? 'green' : 'blue'
   const titleText = terminal === 'error' ? '✕ 失败'
                   : terminal === 'done'  ? '✓ 已完成'
                   : '● 处理中'
+
+  // Body 设计：主元素 (typewriter) + hr 分隔 + 右对齐小灰字 footer meta。
+  // 流式更新只触发 element_id='streaming_content'，hr/footer 静态不抖动。
+  // finalize 时整卡 PUT 替换，footer 显示耗时（"3s" / "1m 20s" 等）。
+  let footerText
+  if (terminal === 'done') {
+    footerText = elapsedMs ? `已完成 · ${formatElapsed(elapsedMs)}` : '已完成'
+  } else if (terminal === 'error') {
+    footerText = elapsedMs ? `已终止 · ${formatElapsed(elapsedMs)}` : '已终止'
+  } else {
+    footerText = '正在输出'
+  }
+
   return {
     schema: '2.0',
     config,
     header: {
       title: { tag: 'plain_text', content: titleText },
       template,
-      padding: '4px 12px 4px 12px',
+      padding: '6px 16px 6px 16px',
     },
     body: {
-      elements: [{
-        tag: 'markdown',
-        element_id: ELEMENT_ID,
-        content: text,
-      }],
+      elements: [
+        { tag: 'markdown', element_id: ELEMENT_ID, content: text, text_align: 'left' },
+        { tag: 'hr' },
+        { tag: 'markdown', content: footerText, text_size: 'notation', text_align: 'right' },
+      ],
     },
   }
+}
+
+function formatElapsed(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return ''
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const rs = s % 60
+  if (m < 60) return rs ? `${m}m ${rs}s` : `${m}m`
+  const h = Math.floor(m / 60)
+  const rm = m % 60
+  return rm ? `${h}h ${rm}m` : `${h}h`
 }
 
 function truncate(s, max) {
@@ -340,11 +364,13 @@ function doFinalize({ state, file, content, status, errorMsg }) {
   if (errorMsg) state.errorMsg = errorMsg
 
   state.sequence += 1
+  const elapsedMs = state.createdAt ? Date.now() - state.createdAt : 0
   const finalCard = buildCard({
     content: state.content,
     streaming: false,
     summary: summaryFor(state),
     terminal: state.terminal,
+    elapsedMs,
   })
   try {
     replaceCard({ cardId: state.cardId, card: finalCard, sequence: state.sequence })
@@ -434,7 +460,7 @@ function main() {
 if (require.main === module) main()
 
 module.exports = {
-  buildCard, summaryFor, truncate,
+  buildCard, summaryFor, truncate, formatElapsed,
   readProfile, stateFilePath, readState, writeState,
   cmdReport,
   ELEMENT_ID, MAX_CONTENT_CHARS,
