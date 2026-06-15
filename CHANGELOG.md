@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.31] - 2026-06-15
+
+- fix: worker 中途多报上调到强制（解决"群里只看到最后已完成卡片"翻车）
+
 ## [0.1.30] - 2026-06-15
 
 - feat: 换行判据 + slack 端 redact + 文档大同步
