@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.22] - 2026-06-15
+
+- feat: lark 流式卡片（CardKit v2 typewriter + 三态 header）
+
 ## [0.1.21] - 2026-06-09
 
 - chore(doctor): §2 schema drift 名单加 busy_reaction
