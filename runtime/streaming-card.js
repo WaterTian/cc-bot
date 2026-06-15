@@ -74,8 +74,8 @@ function buildCard({ content, streaming, summary, terminal }) {
     // streaming_config 控制 typewriter 节奏；不写也能跑（用 Feishu 默认 70ms/1），
     // 显式写出来后可调速。print_strategy: 'fast' = 未打完瞬切到新内容；'delay' = 续打完旧文本再上新。
     config.streaming_config = {
-      print_frequency_ms: { default: 100 },
-      print_step: { default: 2 },
+      print_frequency_ms: { default: 60 },
+      print_step: { default: 4 },
       print_strategy: 'fast',
     }
   }
@@ -226,6 +226,10 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
   }
   const chatId = im.chat_id
   const enabled = im.streaming_card && im.streaming_card.enabled === true
+  // v0.1.27+：短内容门槛。一次性 --final 调用 + 内容 ≤ 阈值 → 不建卡片，直接 +messages-reply 文本。
+  // 让"开 flag = 长结论才出卡，短回复仍是文本"成为默认行为，避免每条"好"/"V22.22.2" 都包卡片视觉过重。
+  const shortThreshold = (im.streaming_card && Number.isFinite(im.streaming_card.short_threshold))
+    ? im.streaming_card.short_threshold : 100
 
   // 自动脱敏：worker 写的 --content / --error-msg 强制过一遍 redact，
   // 替换 slack token / 飞书 ID / 真名（profile.privacy.blocklist）/ 邮箱 / 手机号等敏感串。
@@ -241,6 +245,19 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
     sendPlainText({ replyTo: msgId, chatId, content })
     writeState(file, { mode: 'reply', terminal: 'done', createdAt: Date.now() })
     return ok({ mode: 'reply', reason: 'flag-off' })
+  }
+
+  // ===== 路径 1.5（v0.1.27+）：短内容 + --final → 不建卡，直接文本 reply =====
+  // 适用：主会话 inline 短结论 / worker 一次性 finalize 短内容 / 占位 "好" 等。
+  // 短消息不出卡片，避免视觉过重；超过阈值的长内容仍走流式卡片。
+  if (!state && enabled && isFinal && typeof content === 'string'
+      && content.trim().length <= shortThreshold && status !== 'error') {
+    sendPlainText({ replyTo: msgId, chatId, content })
+    writeState(file, {
+      mode: 'reply', terminal: 'done', createdAt: Date.now(),
+      reason: 'short-content', contentLen: content.length,
+    })
+    return ok({ mode: 'reply', reason: 'short-content', contentLen: content.length })
   }
 
   // ===== 路径 2：首次调用 + flag 开 → 尝试建卡 =====
@@ -271,9 +288,10 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
     }
     state = { ...initState, cardId, messageId }
 
-    // 首次调用就带 --final → 卡刚建立立刻 finalize
+    // 首次调用就带 --final → 卡刚建立立刻 finalize。
+    // state.content 已经是 initialContent（initState），不再传 content 防重复 append。
     if (isFinal || status === 'error') {
-      return doFinalize({ state, file, content: initialContent, status, errorMsg })
+      return doFinalize({ state, file, content: undefined, status, errorMsg })
     }
     writeState(file, state)
     return ok({ mode: 'card', sequence: state.sequence, action: 'created' })
