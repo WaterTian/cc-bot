@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.28] - 2026-06-15
+
+- feat: 卡片设计感升级（hr + footer 耗时）+ 上下线通知极简化
+
 ## [0.1.27] - 2026-06-15
 
 - fix: streaming-card.js short_threshold + 修首次 final 重复 bug
