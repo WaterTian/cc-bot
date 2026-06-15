@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Develop project from group chat — by Claude Code. Lark/Feishu + Slack, IM-agnostic.",
-    "version": "0.1.22"
+    "version": "0.1.23"
   },
   "plugins": [
     {
