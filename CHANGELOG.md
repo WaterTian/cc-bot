@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.26] - 2026-06-15
+
+- fix: streaming-card.js isOmId 收紧（v0.1.22 遗留：fake om_ id 走错路径）
+
 ## [0.1.25] - 2026-06-15
 
 - feat: 消息调度代码化（dispatch.js 接管 agents.json 全生命周期）
