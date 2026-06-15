@@ -444,7 +444,7 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 30s 主
 }
 ```
 
-文件不存在视为空态 `{"slots_max": 3, "running": [], "queue": []}`，主会话首次读到 miss 时自己 Write 空态。重启 bot 时 registry 全清（和 `poll.emitted` 同策略，因为 subagent 会随主会话 stop 失去监听）。
+文件读写由 `runtime/dispatch.js` 接管（v0.1.25+，主会话不直接 Edit），缺失自动建空态。重启 bot 时 registry 全清（和 `poll.emitted` 同策略，subagent 会随主会话 stop 失去监听）。
 
 **字段格式规范**：
 - `started_at` / `queued_at`：**ISO 8601 字符串**（如 `"2026-04-22T10:00:00Z"`），用于人类可读 debug 和超时判定（主会话用 `new Date(x).getTime()` 换算）
@@ -460,74 +460,62 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 30s 主
 
 判定阈值：**预估 ≤ 3 个 tool_use + 单文件 + < 30s 走 inline**，否则 subagent。上下文 > 70% 时阈值收紧（倾向 subagent 保主会话）。
 
-### 派单前必做（顺序）
+### 派单决策（v0.1.25+ dispatch.js 接管 agents.json 全生命周期）
 
 1. **Fetch 核对**（§最高优先级规则 2 不变）
-2. **意图 + 分派决策**：inline 还是 subagent
-3. **生成 tags**（subagent 才需要）：
-   - `read:<path-prefix>`：只读分析 / 格式检查 / 代码审计（如"检查 README 格式"）
-   - `write:<path-prefix>`：写代码的路径前缀（目录层级，`write:src/auth`）
-   - `mcp:<name>`：独占型 MCP（`mcp:wechat-devtools` / `mcp:chrome-devtools`）
-   - `port:<n>`：dev server / preview 端口
-   - `net:push`：发码 / 部署 / 推送这类不可并发
-   - `exclusive:git`：rebase / push / tag 这类 git 独占
-   tag 集合不求穷尽，抓"这件事最怕被谁同时动"就够
+2. **意图 + inline/subagent 判定**（按上面 §分派决策表 阈值；inline 路径走 §完整流程，不进 dispatch）
+3. **生成 tags**（subagent 才需要）—— 抓"这件事最怕被谁同时动"就够：
+   - `read:<path>` / `write:<path>` — 路径冲突（按目录段，read-read 不冲；prefix 匹配在 dispatch.js 内部）
+   - `mcp:<name>` / `port:<n>` — 独占资源
+   - `net:push` / `exclusive:git` — 发布 / git 独占
+4. **调 dispatch.js register**：
 
-   **冲突规则**（仅用于 `read:` / `write:` 两个前缀；其他前缀一律同值即冲突）：
-   - `read:X` vs `read:X` → **不冲突**（并发读无副作用）
-   - `read:X` vs `write:X` → **冲突**（避免读到写一半的文件）
-   - `write:X` vs `write:X` → **冲突**（避免覆盖）
-   - 前缀匹配按"一方是另一方的前缀即算同值"（例 `write:src/auth` 与 `write:src/auth/login` 冲突；`write:src/auth` 与 `write:src/api` 不冲突）
-4. **查 registry**（按顺序判，命中就入队不再看后面）：
-   - `running.length >= slots_max` → 入队（reason: `slot_full`）
-   - 新任务 tags 与任一 `running[i].tags` **非空交集** → 入队（reason: `conflict:<tag>`）
-   - 同 `user_open_id` 已在 running 或 queue → 入队（reason: `user_serial`）
-   - 否则 → 派单
+   ```bash
+   node ${CLAUDE_PLUGIN_ROOT}/runtime/dispatch.js register \
+     --project <项目根> \
+     --task-json '{"msg_id":"<om_xxx>","user_open_id":"<ou_xxx>","user_name":"<name>","intent":"<key>","tags":[...]}'
+   # → {"action":"dispatch|queue|reject","reason":"...","taskId":"agent_om_xxx","queuePosition":N|null}
+   ```
 
-### 派单动作（单任务）
+   CLI 内部一次性原子完成：评估 slot 满 / tags 冲突 / 同 user 串行 → 写 `agents.json`（running 或 queue）→ 返 action。**主会话不再手动 Edit agents.json**。
 
-1. Edit `agents.json`，把任务写进 `running[]`
-2. 回群占位消息：「好，开始 X」（≤15 字，§ACK 响应节奏不变）
-3. 推进 `state.json.last_processed_time = msg.create_time`（**不等 subagent 完成**，派出去就算处理完）
-4. 调 `Agent` 派 worker，参数：
-   - `subagent_type: 'cc-bot:worker'` **必填** — cc-bot 插件自带的群任务执行 agent（`agents/worker.md`）。发群方式（lark / slack 分流）/ 回报格式（≤200 字结论先行）/ 脱敏 / 研究类 local-first / 证据驱动 vs 假设驱动，**均已在 worker.md 内固化**
-   - `run_in_background: true` **必填**
-   - prompt 只传以下 4 个值（worker.md 已含全部行为规范，**不要在此重复发群模板 / 回报要求 / 脱敏规则**）：
-     - 任务描述
-     - `项目根 = <profile.project.root 绝对路径>`
-     - `msg_id = <触发本任务的用户消息 id，从 NEW_MSG 取>`（worker 据此 lark 发群）
-     - `plugin_root = ${CLAUDE_PLUGIN_ROOT}`（worker 据此 lark 流式卡片 / slack 发群 —— subagent 运行时此环境变量为空，必须由主会话传入）
-5. 主会话本次响应结束，继续接下条 NEW_MSG
+   action 含义 + 应对：
+   - `dispatch` → 派 worker（步骤 5）
+   - `queue`    → 回群"收到。前面 `queuePosition` 个任务在跑，排到后开始"，推 state，本响应结束。reason 见下
+   - `reject`   → reason=`queue_full`，回"任务队列已满（10 条），稍后再试"
+
+   reason（queue 时）：`slot_full` / `conflict:path-overlap:...` / `conflict:exclusive-tag:...` / `user_serial`。
+
+5. **dispatch 派单动作**：
+   - 回群占位（流式卡片模式下跳过此步，worker 起卡即占位）
+   - 推 `state.json.last_processed_time = msg.create_time`
+   - 调 `Agent(subagent_type:'cc-bot:worker', run_in_background:true)`，prompt 只传 4 字段（任务描述 / `项目根` / `msg_id` / `plugin_root = ${CLAUDE_PLUGIN_ROOT}`）—— 其他规范都在 worker.md
+   - 本响应结束，接下条 NEW_MSG
 
 ### Fan-out（单消息多 subagent 并行）
 
-一条用户消息提多件事（"review PR + 跑测试 + 查历史 bug"）可以拆。**前提**：
+一条用户消息提多件事可以拆。前提：子任务无依赖 + tags 两两无交集 + 数量 ≤ 3。
 
-- 子任务无依赖（不是"先 A 再 B"顺序链）
-- 子任务 tags 两两无交集
-- 数量 ≤ 3
+派法：同响应里多个 `Agent` tool_use；register 时一次性 `"subagent_count": N`、`"tags"` 是所有子任务 tags 并集（影响后续冲突判定）。
 
-**派法**：同一个响应里多个 `Agent` tool_use（都 `run_in_background=true`）。registry 按一个任务记录，`subagent_count = N`，`tags` 取所有子任务 tags 并集（影响后续冲突判定）。
+### 完成回收（dispatch.js complete）
 
-### 入队动作
+subagent 完成时 `run_in_background` 自动 notify 主会话，调代码：
 
-1. Edit `agents.json.queue` 追加任务，带 reason
-2. 回群：「收到。前面 N 个任务在跑，排到后开始。」（N = `running.length + queue 中该任务之前的条数`）
-3. 推进 state.json
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/runtime/dispatch.js complete \
+  --project <项目根> --task-id <agent_om_xxx>
+# → {"removed":true,"promoted":<Task|null>}
+```
 
-### 完成通知 + 队列 pop
+CLI 自动从 queue 头扫第一个可 promote 的（slot 有空 + 不冲突 + 同 user 不在剩余 running + 同 user 队前没排过 → 保 FIFO），把它写回 running 返回 `promoted`。`promoted` 非 null → 按上面 dispatch 步骤 5 派 promoted 那条；null → 啥都不做。
 
-subagent 完成时主会话收到自动通知（`run_in_background` 机制）。处理：
-
-1. Edit `agents.json`，running[] 移除对应任务
-2. fan-out 任务（`subagent_count > 1`）：等**所有**子 agent 都完成再移除
-3. 扫 queue[] 从头找**第一个能跑的**（slot 有空 + tags 不与剩余 running 冲突 + 不违反同用户串行）→ 按派单动作走
-4. 队列里后面的任务可越过前面的跑（非严格 FIFO），只要不违反同用户串行
+fan-out 任务（`subagent_count > 1`）：等**所有**子 agent 完成再调 complete 一次。
 
 ### 队列上限 / 超时
 
-- queue.length 上限 10；满了直接回群「任务队列已满（10 条），稍后再试」，不入队
-- 单 subagent 任务预计 > 30min（如大型部署）先警告用户，确认再派；卡住无响应靠 §Monitor 异常重启 兜底
+- 队列 10 上限（QUEUE_LIMIT，dispatch.js 常量）：register 返回 `action:'reject', reason:'queue_full'` 时回"任务队列已满，稍后再试"
+- 单任务预计 > 30min（大型部署）先警告用户确认再派；卡住无响应靠 §Monitor 异常重启 兜底
 
 ### 与 §Agent 优先策略 的关系
 
