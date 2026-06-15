@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.24] - 2026-06-15
+
+- feat: 文本脱敏 + ACK 检测代码化（redact.js + ack-detect.js）
+
 ## [0.1.23] - 2026-06-15
 
 - feat: 权限矩阵 + 意图解析代码化（permission.js + intent.js）
