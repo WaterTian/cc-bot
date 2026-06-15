@@ -146,8 +146,13 @@ function writeState(file, state) {
 
 // === transports ===
 
+// 飞书 open_message_id 严格格式：`om_` 前缀 + ≥20 alphanumeric 字符（实测 om_x100b6dc37c2d88b8b30ece54f94cae8 这种 36 字符）。
+// 旧版只检前缀导致 fake id（如 om_e2e_test）被认作真 om_，触发 reply 路径报"must start with om_"——表面 prefix 对但 id 不存在。
+// 收紧后 fake id 走 chat-id 直发分支，测试场景顺畅。
+const OM_ID_PATTERN = /^om_[a-z0-9]{20,}$/i
+
 function isOmId(s) {
-  return typeof s === 'string' && s.startsWith('om_')
+  return typeof s === 'string' && OM_ID_PATTERN.test(s)
 }
 
 function sendPlainText({ replyTo, chatId, content }) {
