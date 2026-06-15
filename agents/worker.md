@@ -39,20 +39,27 @@ effort: xhigh
 
 读 `<项目根>/.cc-bot/profiles/active.json` 的 `im.type` 判断，回群语言按 `im.locale`（缺省 lark=zh-CN / slack=en-US）：
 
-- **lark**：
+- **lark**：用 `streaming-card.js report`（既是普通 reply 也是流式卡片，CLI 内部按 profile 自动选）：
   ```bash
-  LARK_CLI_NO_PROXY=1 lark-cli im +messages-reply --as bot \
-    --message-id <msg_id> --msg-type text \
-    --content '{"text":"<结论，换行用 \\n 转义>"}'
+  node <plugin_root>/runtime/streaming-card.js report \
+    --project <项目根> --msg-id <msg_id> \
+    --content '<结论，普通 \n 换行即可>' --final
   ```
-  禁用 `--text` 参数 + 反引号 / `$'...'`（Windows Git Bash 下 `\n` 会被字面化）
+  中途想让群里有进度动，可多次调（去掉 `--final`）；最终必传 `--final`，否则群里那张卡一直转。建议中途 ≥ 1s 间隔；`--content` 默认追加（保 typewriter 前缀），用 `--replace` 才覆写。
+
+  失败收尾加 `--status error --error-msg '<一句话原因>'`。
+
+  注：profile.im.streaming_card.enabled 关时 CLI 自动走 `lark-cli +messages-reply` 文本回复；建卡/API 任何失败也静默降级 reply。**worker 不用判断走哪条**。
+
+  极少数情况 CLI 进程自身崩了（非 0 退出 + 看不到 stdout 的 `ok:true`），用 `lark-cli im +messages-reply --as bot --message-id <msg_id> --msg-type text --content '{"text":"..."}'` 兜底直发，保证用户至少看到结论。
+
 - **slack**：
   ```bash
   node <plugin_root>/runtime/slack-send.js send-text --project <项目根> --text "<结论>"
   ```
   channel 与 token 由 slack-send.js 自读 `active.json`，**无需传**。
 
-派单 prompt 传入的字段：`msg_id`（lark 发群用）/ `plugin_root`（slack 发群用，因为 subagent 运行时 `CLAUDE_PLUGIN_ROOT` 环境变量为空）。`项目根` 两端都用。
+派单 prompt 传入的字段：`msg_id`（lark 发群用）/ `plugin_root`（lark + slack 都要用，因为 subagent 运行时 `CLAUDE_PLUGIN_ROOT` 环境变量为空，必须由主会话传入）。`项目根` 两端都用。
 
 ## 安全红线
 

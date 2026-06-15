@@ -12,6 +12,10 @@
     "busy_placeholder": true,
     "busy_reaction": "",
     "debug": false,
+    "streaming_card": {
+      "_comment": "v0.1.22+ 流式卡片（仅 lark）。enabled=true 时，worker 用 runtime/streaming-card.js 把任务进度实时刷到一张飞书 CardKit v2 卡片上（建卡 → 中途 update 工具/正文 → finalize 关流），替代普通 +messages-reply。失败任意环节自动降级回普通 reply。开启前提：lark-cli ≥ 1.0.47（cardkit:card:write scope 已注册）。详见 agents/worker.md §流式卡片模式",
+      "enabled": false
+    },
     "bot_app_id": "cli_xxxxxxxxxxxx",
     "bot_open_id": "",
     "chat_id": "oc_xxxxxxxxxxxx",

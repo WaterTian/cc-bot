@@ -532,7 +532,7 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 30s 主
      - 任务描述
      - `项目根 = <profile.project.root 绝对路径>`
      - `msg_id = <触发本任务的用户消息 id，从 NEW_MSG 取>`（worker 据此 lark 发群）
-     - `plugin_root = ${CLAUDE_PLUGIN_ROOT}`（worker 据此 slack 发群 —— subagent 运行时此环境变量为空，必须由主会话传入）
+     - `plugin_root = ${CLAUDE_PLUGIN_ROOT}`（worker 据此 lark 流式卡片 / slack 发群 —— subagent 运行时此环境变量为空，必须由主会话传入）
 5. 主会话本次响应结束，继续接下条 NEW_MSG
 
 ### Fan-out（单消息多 subagent 并行）

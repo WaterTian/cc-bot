@@ -32,7 +32,7 @@ Execute checks in parallel where possible. Collect results, then print one unifi
   - `project.root` is an existing directory — ✗ if path 不存在 / 仍是 `D:/Path/To/Project`
   - `paths.bot_temp_abs` / `bot_temp_rel` both present — ⚠ if missing
   - `members.admin_open_ids` non-empty array — ⚠ if `[]`（ admin 权限矩阵将全部回退到 member）
-- **Schema drift（v0.1.21+，issue #11）**：扫 profile **顶级**键，对每个属于 IM 域且应在 `im.*` 下的已知字段名报 ⚠。已知名单：`busy_placeholder` / `busy_reaction` / `debug` / `locale` / `type` / `bot_app_id` / `bot_open_id` / `chat_id` / `chat_name` / `bot_user_id` / `extra`。命中即报：
+- **Schema drift（v0.1.21+，issue #11）**：扫 profile **顶级**键，对每个属于 IM 域且应在 `im.*` 下的已知字段名报 ⚠。已知名单：`busy_placeholder` / `busy_reaction` / `debug` / `locale` / `type` / `bot_app_id` / `bot_open_id` / `chat_id` / `chat_name` / `bot_user_id` / `extra` / `streaming_card`。命中即报：
   - ⚠ 「字段 `<name>` 写在 profile 顶级 — poll.js 只读 `im.<name>`，当前值不会生效。请把它搬到 `im` 块内」
   - 背景：v0.1.19 引入 `im.busy_placeholder` opt-out 时已纳 `im` 块，若用户曾按非官方示例写在顶级，开关将静默失效
 
