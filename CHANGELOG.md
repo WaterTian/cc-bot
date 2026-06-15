@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.34] - 2026-06-15
+
+- fix: streaming-card 字面 \n 自动转真换行 + worker.md 极简化
+
 ## [0.1.33] - 2026-06-15
 
 - feat: dispatch.js 预热流式卡片 + 孤儿兜底 finalize（issue #15 / #13 / #16）
