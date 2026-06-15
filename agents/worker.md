@@ -51,7 +51,8 @@ effort: xhigh
 
   以下时点**必须**至少各调一次 report：
 
-  1. **接到任务 1-2 秒内**（首报，建卡 + 占位）—— `--content '**接到任务：<一句话概括>**\n\n开工...'`（**必含 `\n`**，触发卡片路径而不是单行 reply）
+  1. **接到任务 1-2 秒内**（首报）—— 卡片已由 `dispatch.js register` 预热（v0.1.33+，hero 已是 `**接到任务：<intent/subject>**`）。你的第一次 report 用 `--content '\n\n### 开工\n\n> 已锁定：<具体目标一行>'` **append** 即可（path 3c update，无须建卡）。
+     **禁止 Read `streaming-card.js --help` 或源码**——CLI 入参已在下面 §调用基本形 全列出，证据驱动豁免（worker.md 即入参契约）。多 1-3s 读 help / 源码的延迟全是用户在群里看着 hero "排队中..." 等你开工。
   2. **每个阶段切换**（如"开始改后端" → "改完，进部署阶段"）—— append 新 `### N. 阶段名\n\n...`
   3. **每个长 Bash / 长 tool 调用前 + 完成后**（≥3 秒的 Read 大文件 / Edit 多文件 / Bash 测试-部署等）
   4. **任务收尾** —— `--final` 加最终结论（hero 加粗）
@@ -59,20 +60,29 @@ effort: xhigh
   ### 调用基本形
 
   ```bash
-  # 首报（建卡 + 占位 hero）—— msg_id 用派单 prompt 传入的那个
+  # 首报（卡片已预热，直接 append 第一段进度）—— msg_id 用派单 prompt 传入的那个
   node <plugin_root>/runtime/streaming-card.js report \
     --project <项目根> --msg-id <msg_id> \
-    --content '**接到任务：修 token 校验**\n\n开工，先定位...'
+    --content '\n\n### 开工\n\n> 已锁定：src/auth/token.ts'
 
   # 中途累加（append，保 typewriter 前缀；间隔 ≥ 1s）
   node <plugin_root>/runtime/streaming-card.js report \
     --project <项目根> --msg-id <msg_id> \
     --content '\n\n### 1. 定位\n\n> 扫 src/auth/...'
 
-  # 收尾（--final 关流，footer 显示耗时）
+  # 收尾（--final 关流，header 翻绿，footer 显示耗时）
   node <plugin_root>/runtime/streaming-card.js report \
     --project <项目根> --msg-id <msg_id> \
     --content '\n\n**已完成 push 到 main 分支**' --final
+
+  # 失败收尾（header 翻红，footer "已终止"，--error-msg 只入 state 不发群）
+  node <plugin_root>/runtime/streaming-card.js report \
+    --project <项目根> --msg-id <msg_id> \
+    --content '\n\n**未完成：依赖装不上**' \
+    --final --status error --error-msg '<一句话原因>'
+
+  # 覆写（极少用，正常都 append；要全部重排版才加 --replace）
+  # ... --content '<全新正文>' --replace
   ```
 
   ### 节奏规则
@@ -97,9 +107,9 @@ effort: xhigh
   - ⚠ **不用 markdown 表格** `| ... |`——多文件改动用 `- ` 列表 + inline code 表达；真要表格 finalize 时另发一条普通消息
   - ⚠ **不用 `#` / `##`** 大标题——卡 header 已是 H1 位
 
-  失败收尾加 `--status error --error-msg '<一句话原因>'`。
+  失败收尾参考上面 §调用基本形 第 4 段。
 
-  注：profile.im.streaming_card.enabled 关时 CLI 自动走 `lark-cli +messages-reply` 文本回复；建卡/API 任何失败也静默降级 reply。**worker 不用判断走哪条**。
+  注：profile.im.streaming_card.enabled 关时 dispatch.js 不预热卡，主会话发占位文本，worker 后续 report 自动走 +messages-reply 模式；建卡 / API 任何失败也静默降级 reply。**worker 不用判断走哪条**。预热极少数情况失败（state 文件不存在）→ worker 第一次 report 自动走路径 2 自建卡，等价旧行为，无须感知。
 
   极少数情况 CLI 进程自身崩了（非 0 退出 + 看不到 stdout 的 `ok:true`），用 `lark-cli im +messages-reply --as bot --message-id <msg_id> --msg-type text --content '{"text":"..."}'` 兜底直发，保证用户至少看到结论。
 

@@ -247,7 +247,7 @@ Main session ── Monitor(persistent) ── node poll.js ── lark: every 3
 | `runtime/intent.js` | intent 解析：占位符替换（`<project.root>` / `<paths.bot_temp_abs>` 等）+ 动态可用清单（doc_progress 文件存在校验）|
 | `runtime/redact.js` | 文本脱敏（slack token / Bearer / JWT / `app_secret=*` / 飞书 cli_/ou_/om_ ID / 邮箱 / 手机号 / blocklist 真名）—— lark + slack 发群入口强制调 |
 | `runtime/ack-detect.js` | 短消息 ACK 语义判定（yes / continue / ok / thanks + 停止词否决）+ 推荐回复 |
-| `runtime/dispatch.js` | agents.json 调度生命周期（evaluate / register / complete）— tags 冲突 + slot + 同 user 串行全代码化 |
+| `runtime/dispatch.js` | agents.json 调度生命周期（evaluate / register / complete）— tags 冲突 + slot + 同 user 串行全代码化。v0.1.33+ register 同步预热流式卡片（首帧 6-10s → 1-2s，issue #15），complete 兜底 finalize 防孤儿 "● 处理中" 卡 |
 | `runtime/profile-migrate.js` | 版本化 profile schema migration — 升级时自动 backfill 历史新增字段，不覆盖用户已设值 |
 | `runtime/todo-bridge.js` | v0.1.32+ CC `PreToolUse` hook bridge — 主会话调 TodoWrite / TaskCreate / TaskUpdate 时自动 diff todos 变化 → spawn streaming-card.js 把进度（▸ 进行中 / ✓ 完成）推到当前 running 任务的卡片，**worker 端零负担**（hook 异步 detached 不阻塞主会话）|
 

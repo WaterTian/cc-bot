@@ -26,15 +26,19 @@
 //   node runtime/dispatch.js ls       --project <root>
 //
 // task-json 形如：
-//   {"msg_id":"om_xxx","user_open_id":"ou_xxx","intent":"deploy","tags":["write:src/auth","net:push"],"subagent_count":1}
+//   {"msg_id":"om_xxx","user_open_id":"ou_xxx","intent":"deploy","subject":"<可选, ≤60 字人类可读>","tags":["write:src/auth","net:push"],"subagent_count":1}
 
 const fs = require('fs')
 const path = require('path')
+const { execFileSync } = require('child_process')
+const intent = require('./intent')
 
 const DEFAULT_SLOTS_MAX = 3
 const QUEUE_LIMIT = 10
 const PATH_LIKE_PREFIXES = new Set(['read', 'write'])  // 用前缀匹配
 // 其它前缀（mcp / port / net / exclusive 等）走 exact-equal
+const STREAMING_CARD_CLI = path.join(__dirname, 'streaming-card.js')
+const PREHEAT_TIMEOUT_MS = 3000  // 预热卡 / 孤儿兜底 finalize 的硬上限
 
 // === 冲突逻辑 ===
 
@@ -143,6 +147,71 @@ function evaluate({ newTask, agentsJson }) {
   return { action: 'dispatch', reason: 'allowed' }
 }
 
+// === 卡片预热 + 孤儿兜底（v0.1.33+，issue #15）===
+
+// 预热卡：dispatch 决定派单时同步在 dispatch.js 里建卡，把首次 cardkit POST 从
+// worker 关键路径挪到 dispatch 侧。首帧 6-10s → 1-2s。
+// 仅 lark + streaming_card.enabled 才预热；slack / 关卡场景维持主会话"回群占位"原行为。
+// 3s 超时静默吞掉：失败时无 state 文件 → worker 首次 report 走路径 2 自建卡，等价旧行为。
+function preheatCard({ project, newTask }) {
+  if (!newTask || !newTask.msg_id) return
+  let profile
+  try {
+    profile = JSON.parse(fs.readFileSync(
+      path.join(project, '.cc-bot', 'profiles', 'active.json'), 'utf8'))
+  } catch { return }
+  const im = (profile && profile.im) || {}
+  if (im.type !== 'lark') return
+  if (!(im.streaming_card && im.streaming_card.enabled === true)) return
+
+  const subject = pickSubject(newTask, profile)
+  const content = `**接到任务：${subject}**\n\n排队中，启动 worker...`
+  try {
+    execFileSync('node', [
+      STREAMING_CARD_CLI, 'report',
+      '--project', project,
+      '--msg-id', newTask.msg_id,
+      '--content', content,
+    ], { stdio: 'ignore', timeout: PREHEAT_TIMEOUT_MS, windowsHide: true })
+  } catch {
+    // 超时 / 失败 → 忽略；worker 首次 report 会自己建卡兜底
+  }
+}
+
+// 优先级：主会话显式 subject > intent description 首句 > 通用兜底。
+// intent description 截到首个句号/换行 + 60 字（参 intent.js listAvailable 同款截法）。
+function pickSubject(newTask, profile) {
+  const explicit = String(newTask.subject || '').trim()
+  if (explicit) return explicit.slice(0, 60)
+  const r = intent.resolveAction(newTask.intent, profile)
+  if (r && r.found && r.description) {
+    const first = String(r.description).split(/[。\.\n]/)[0].trim().slice(0, 60)
+    if (first) return first
+  }
+  return '处理中'
+}
+
+// 孤儿兜底 finalize：worker 完成回收时若卡片仍 running → 强制 finalize 为 error。
+// 正常路径上 worker 已经 --final 过，state.terminal !== 'running'，CLI 路径 3b 幂等返回。
+// 异常路径（worker 崩 / 卡死被 kill / 模型异常退出）下避免"● 处理中"挂群里不收口。
+function finalizeStrandedCard({ project, removed }) {
+  if (!removed || !removed.msg_id) return
+  const stateFile = path.join(project, '.cc-bot', 'runtime', `stream-${removed.msg_id}.json`)
+  let state
+  try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')) } catch { return }
+  if (state.mode !== 'card' || state.terminal !== 'running') return
+  try {
+    execFileSync('node', [
+      STREAMING_CARD_CLI, 'report',
+      '--project', project,
+      '--msg-id', removed.msg_id,
+      '--final',
+      '--status', 'error',
+      '--error-msg', 'worker 异常退出，未发回结论',
+    ], { stdio: 'ignore', timeout: PREHEAT_TIMEOUT_MS, windowsHide: true })
+  } catch {}
+}
+
 // === register（评估 + 原子写入）===
 
 function makeTaskId(newTask) {
@@ -171,6 +240,8 @@ function register({ project, newTask }) {
     enriched.started_at = new Date().toISOString()
     agentsJson.running.push(enriched)
     writeAgents(project, agentsJson)
+    // 派单决定后立刻预热卡片（lark + streaming_card 开 才会真建卡，其它场景 no-op）
+    preheatCard({ project, newTask })
     return { ...decision, taskId, queuePosition: null }
   }
 
@@ -224,6 +295,7 @@ function complete({ project, taskId }) {
   if (idx < 0) {
     return { removed: false, promoted: null, reason: 'task-not-in-running' }
   }
+  const removed = agentsJson.running[idx]
   agentsJson.running.splice(idx, 1)
 
   // 从 queue 头扫，找第一个可 promote 的候选
@@ -249,6 +321,8 @@ function complete({ project, taskId }) {
   }
 
   writeAgents(project, agentsJson)
+  // 孤儿卡片兜底（worker 异常退出时 state 仍 running → 强制 finalize 为 error，幂等）
+  finalizeStrandedCard({ project, removed })
   return { removed: true, promoted }
 }
 
