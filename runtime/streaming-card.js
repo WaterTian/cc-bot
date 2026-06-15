@@ -268,6 +268,13 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
   if (typeof content === 'string') content = redact.text(content, profile)
   if (typeof errorMsg === 'string') errorMsg = redact.text(errorMsg, profile)
 
+  // v0.1.34+ 兜底：worker 用 bash 单引号写 `\n` 字面（不解为换行）→ markdown 渲染器把字面 `\n` 当文本显示，群里翻车。
+  // 判据：content 全无真换行 + 含字面 `\n` → 视作 markdown 换行约定，统一转真换行。
+  // 已含真换行不动（保护 fenced code block 里的 `\n` 字面，如 `echo -e "a\nb"`）。
+  if (typeof content === 'string' && !content.includes('\n') && content.includes('\\n')) {
+    content = content.replace(/\\n/g, '\n')
+  }
+
   const file = stateFilePath(project, msgId)
   let state = readState(file)
 

@@ -51,38 +51,31 @@ effort: xhigh
 
   以下时点**必须**至少各调一次 report：
 
-  1. **接到任务 1-2 秒内**（首报）—— 卡片已由 `dispatch.js register` 预热（v0.1.33+，hero 已是 `**接到任务：<intent/subject>**`）。你的第一次 report 用 `--content '\n\n### 开工\n\n> 已锁定：<具体目标一行>'` **append** 即可（path 3c update，无须建卡）。
+  1. **接到任务 1-2 秒内**（首报）—— 卡片已由 `dispatch.js register` 预热（v0.1.33+，hero 已是 `**接到任务：<intent/subject>**`）。你的第一次 report 用一段开工 markdown **append**（path 3c update，无须建卡）。
      **禁止 Read `streaming-card.js --help` 或源码**——CLI 入参已在下面 §调用基本形 全列出，证据驱动豁免（worker.md 即入参契约）。多 1-3s 读 help / 源码的延迟全是用户在群里看着 hero "排队中..." 等你开工。
-  2. **每个阶段切换**（如"开始改后端" → "改完，进部署阶段"）—— append 新 `### N. 阶段名\n\n...`
+  2. **每个阶段切换**（如"开始改后端" → "改完，进部署阶段"）—— append 新 `### N. 阶段名` 段
   3. **每个长 Bash / 长 tool 调用前 + 完成后**（≥3 秒的 Read 大文件 / Edit 多文件 / Bash 测试-部署等）
   4. **任务收尾** —— `--final` 加最终结论（hero 加粗）
 
   ### 调用基本形
 
+  `--content` 写 markdown，用 `\n` 表示换行（v0.1.34+ CLI 自动把字面 `\n` 转真换行）。msg_id 用派单 prompt 传入的那个。
+
   ```bash
-  # 首报（卡片已预热，直接 append 第一段进度）—— msg_id 用派单 prompt 传入的那个
-  node <plugin_root>/runtime/streaming-card.js report \
-    --project <项目根> --msg-id <msg_id> \
+  # 首报（卡已预热，append 第一段开工进度）
+  node <plugin_root>/runtime/streaming-card.js report --project <项目根> --msg-id <msg_id> \
     --content '\n\n### 开工\n\n> 已锁定：src/auth/token.ts'
 
-  # 中途累加（append，保 typewriter 前缀；间隔 ≥ 1s）
-  node <plugin_root>/runtime/streaming-card.js report \
-    --project <项目根> --msg-id <msg_id> \
-    --content '\n\n### 1. 定位\n\n> 扫 src/auth/...'
+  # 中段累加（默认 append）
+  ... --content '\n\n### 1. 定位\n\n> 扫 src/auth/...'
 
-  # 收尾（--final 关流，header 翻绿，footer 显示耗时）
-  node <plugin_root>/runtime/streaming-card.js report \
-    --project <项目根> --msg-id <msg_id> \
-    --content '\n\n**已完成 push 到 main 分支**' --final
+  # 收尾
+  ... --content '\n\n**已完成 push 到 main 分支**' --final
 
-  # 失败收尾（header 翻红，footer "已终止"，--error-msg 只入 state 不发群）
-  node <plugin_root>/runtime/streaming-card.js report \
-    --project <项目根> --msg-id <msg_id> \
-    --content '\n\n**未完成：依赖装不上**' \
-    --final --status error --error-msg '<一句话原因>'
+  # 失败收尾
+  ... --content '\n\n**未完成：依赖装不上**' --final --status error --error-msg '<一句话原因>'
 
-  # 覆写（极少用，正常都 append；要全部重排版才加 --replace）
-  # ... --content '<全新正文>' --replace
+  # 全文覆写（极少用）：加 --replace
   ```
 
   ### 节奏规则
