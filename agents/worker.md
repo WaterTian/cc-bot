@@ -39,13 +39,48 @@ effort: xhigh
 
 读 `<项目根>/.cc-bot/profiles/active.json` 的 `im.type` 判断，回群语言按 `im.locale`（缺省 lark=zh-CN / slack=en-US）：
 
-- **lark**：用 `streaming-card.js report`（既是普通 reply 也是流式卡片，CLI 内部按 profile 自动选）：
+- **lark**：用 `streaming-card.js report`（既是普通 reply 也是流式卡片，CLI 内部按 profile 自动选）。
+
+  ### 心智模型：把 report 当"工作日志同步入口"
+
+  worker 工作时**每完成一个独立动作 / 切换阶段就调一次 report**（不带 `--final`），把当前进度推到群里——**像跟群里人说话一样自然**，**禁止把所有进度攒到最后一次 `--final` 集中发**（用户在群里只能看到"已完成"，丢失全部流式价值，2026-06-15 实测翻车）。
+
+  ### 强制触发点
+
+  以下时点**必须**至少各调一次 report：
+
+  1. **接到任务 1-2 秒内**（首报，建卡 + 占位）—— `--content '**接到任务：<一句话概括>**\n\n开工...'`（**必含 `\n`**，触发卡片路径而不是单行 reply）
+  2. **每个阶段切换**（如"开始改后端" → "改完，进部署阶段"）—— append 新 `### N. 阶段名\n\n...`
+  3. **每个长 Bash / 长 tool 调用前 + 完成后**（≥3 秒的 Read 大文件 / Edit 多文件 / Bash 测试-部署等）
+  4. **任务收尾** —— `--final` 加最终结论（hero 加粗）
+
+  ### 调用基本形
+
   ```bash
+  # 首报（建卡 + 占位 hero）—— msg_id 用派单 prompt 传入的那个
   node <plugin_root>/runtime/streaming-card.js report \
     --project <项目根> --msg-id <msg_id> \
-    --content '<结论，普通 \n 换行即可>' --final
+    --content '**接到任务：修 token 校验**\n\n开工，先定位...'
+
+  # 中途累加（append，保 typewriter 前缀；间隔 ≥ 1s）
+  node <plugin_root>/runtime/streaming-card.js report \
+    --project <项目根> --msg-id <msg_id> \
+    --content '\n\n### 1. 定位\n\n> 扫 src/auth/...'
+
+  # 收尾（--final 关流，footer 显示耗时）
+  node <plugin_root>/runtime/streaming-card.js report \
+    --project <项目根> --msg-id <msg_id> \
+    --content '\n\n**已完成 push 到 main 分支**' --final
   ```
-  中途想让群里有进度动，可多次调（去掉 `--final`）；最终必传 `--final`，否则群里那张卡一直转。建议中途 ≥ 1s 间隔；`--content` 默认追加（保 typewriter 前缀），用 `--replace` 才覆写。
+
+  ### 节奏规则
+
+  - **2m+ 长任务**：≥ 4 次 report（首报 + 至少 2 中段 + finalize），让用户在群里感受到"还在跑"
+  - **30s-2m 中任务**：≥ 3 次（首报 + 1 中段 + finalize）
+  - **≤10s 小任务**：可只 1 次 `--final`（一句话单行回也行，CLI 自动走文本 reply）
+
+  - 中途 report 间隔 **≥ 1 秒**（Feishu 50QPS/元素够，但 worker 别频繁刷屏）
+  - `--content` 默认 **append**（累加保 typewriter 前缀关系）；要覆写用 `--replace`
 
   **排版风格**（v0.1.30+，走 Feishu CardKit 原生 markdown 文本流路线）：
   - **首行 `**...**` 粗体 hero**——一句话概括任务结论 / 当前阶段。例：`**已完成：修复 token 校验**`
