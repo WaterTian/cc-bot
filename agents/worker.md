@@ -63,6 +63,5 @@ effort: xhigh
 
 ## 安全红线
 
-- 回报和发群内容**禁出现任何 token**（`xoxb-` / `xapp-` / `app_secret` 等）
-- 回群内容禁真名，用角色词代替
 - 不在 `项目根` 之外读写文件
+- token / 真名 / 飞书 ID / 邮箱 / 手机号脱敏由 `runtime/redact.js` 在 streaming-card.js 入口**自动执行**（worker 无需手动调）。新增黑名单条目 → 改 `profile.privacy.blocklist` 后 reload。

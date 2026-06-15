@@ -33,6 +33,7 @@ Execute checks in parallel where possible. Collect results, then print one unifi
   - `paths.bot_temp_abs` / `bot_temp_rel` both present — ⚠ if missing
   - `members.admin_open_ids` non-empty array — ⚠ if `[]`（ admin 权限矩阵将全部回退到 member）
 - **`intent_permissions`（v0.1.23+，可选）**：若存在，校验每个 value ∈ `{'public','admin','admin-confirm','group-rejected'}` —— ✗ 命中无效值并报告对应 key + 列出有效值集合。同时若 key 不在 `profile.intents` 也不在 `permission.js BUILTIN_LEVELS` 中 → ⚠ "声明了未知 intent `<key>` 的权限"。
+- **`privacy.blocklist`（v0.1.24+，可选）**：若 `profile.privacy.blocklist` 存在，校验是数组且每项是非空 string —— ✗ 命中非法值。校验长度 ≥ 2（短真名易误吃），< 2 报 ⚠"<name>" 太短可能误吃常用词。
 - **Schema drift（v0.1.21+，issue #11）**：扫 profile **顶级**键，对每个属于 IM 域且应在 `im.*` 下的已知字段名报 ⚠。已知名单：`busy_placeholder` / `busy_reaction` / `debug` / `locale` / `type` / `bot_app_id` / `bot_open_id` / `chat_id` / `chat_name` / `bot_user_id` / `extra` / `streaming_card`。命中即报：
   - ⚠ 「字段 `<name>` 写在 profile 顶级 — poll.js 只读 `im.<name>`，当前值不会生效。请把它搬到 `im` 块内」
   - 背景：v0.1.19 引入 `im.busy_placeholder` opt-out 时已纳 `im` 块，若用户曾按非官方示例写在顶级，开关将静默失效

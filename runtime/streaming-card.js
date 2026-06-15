@@ -21,6 +21,7 @@
 const { execSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
+const redact = require('./redact')
 
 const LARK_BIN = 'lark-cli'
 const DEFAULT_TIMEOUT_MS = 15 * 1000
@@ -220,6 +221,12 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
   }
   const chatId = im.chat_id
   const enabled = im.streaming_card && im.streaming_card.enabled === true
+
+  // 自动脱敏：worker 写的 --content / --error-msg 强制过一遍 redact，
+  // 替换 slack token / 飞书 ID / 真名（profile.privacy.blocklist）/ 邮箱 / 手机号等敏感串。
+  // worker 无需自己调 redact CLI——一站式入口都走这里。
+  if (typeof content === 'string') content = redact.text(content, profile)
+  if (typeof errorMsg === 'string') errorMsg = redact.text(errorMsg, profile)
 
   const file = stateFilePath(project, msgId)
   let state = readState(file)

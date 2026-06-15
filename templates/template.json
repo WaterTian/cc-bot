@@ -13,7 +13,7 @@
     "busy_reaction": "",
     "debug": false,
     "streaming_card": {
-      "_comment": "v0.1.22+ 流式卡片（仅 lark）。enabled=true 时，worker 用 runtime/streaming-card.js 把任务进度实时刷到一张飞书 CardKit v2 卡片上（建卡 → 中途 update 工具/正文 → finalize 关流），替代普通 +messages-reply。失败任意环节自动降级回普通 reply。开启前提：lark-cli ≥ 1.0.47（cardkit:card:write scope 已注册）。详见 agents/worker.md §流式卡片模式",
+      "_comment": "v0.1.22+ 流式卡片（仅 lark）。enabled=true 时，worker 用 runtime/streaming-card.js 把任务进度实时刷到一张飞书 CardKit v2 卡片上（建卡 → 中途 update 工具/正文 → finalize 关流），替代普通 +messages-reply。失败任意环节自动降级回普通 reply。开启前提：① lark-cli ≥ 1.0.47（cardkit:card:write scope 已注册） + ② 飞书客户端 ≥ 7.20（CardKit v2 流式渲染需求；旧客户端看到「请升级飞书」占位）。详见 agents/worker.md §流式卡片模式",
       "enabled": false
     },
     "bot_app_id": "cli_xxxxxxxxxxxx",
@@ -55,6 +55,12 @@
   "members": {
     "_comment": "admin_open_ids 列出享受永久授权的管理员，其他群成员按 member 处理",
     "admin_open_ids": []
+  },
+
+  "privacy": {
+    "_comment": "v0.1.24+ 隐私脱敏。runtime/redact.js 在所有发群路径（streaming-card.js report 的 --content / --error-msg）自动执行，无需 worker 手动调用。内置过滤：slack xoxb-/xapp-/Bearer/JWT/app_secret=*/api_key=*、飞书 cli_/ou_/om_ ID、邮箱、中国大陆手机号。blocklist：本项目真名一行一个，自动替换为 blocklist_replace（缺省 '<同事>'）。新增条目改本文件 + reload，无需改代码。",
+    "blocklist": [],
+    "blocklist_replace": "<同事>"
   },
 
   "intents": {
