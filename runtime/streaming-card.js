@@ -258,10 +258,9 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
   }
   const chatId = im.chat_id
   const enabled = im.streaming_card && im.streaming_card.enabled === true
-  // v0.1.27+：短内容门槛。一次性 --final 调用 + 内容 ≤ 阈值 → 不建卡片，直接 +messages-reply 文本。
-  // 让"开 flag = 长结论才出卡，短回复仍是文本"成为默认行为，避免每条"好"/"V22.22.2" 都包卡片视觉过重。
-  const shortThreshold = (im.streaming_card && Number.isFinite(im.streaming_card.short_threshold))
-    ? im.streaming_card.short_threshold : 100
+  // v0.1.30+：判据从字符数阈值改为是否含换行。
+  // worker 写多行（含 `\n`）= 想排版展示 → 卡片；单行 = 一句话答 → 文本。
+  // 比 magic number 阈值更自解释；意图驱动而非长度驱动。
 
   // 自动脱敏：worker 写的 --content / --error-msg 强制过一遍 redact，
   // 替换 slack token / 飞书 ID / 真名（profile.privacy.blocklist）/ 邮箱 / 手机号等敏感串。
@@ -279,17 +278,17 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
     return ok({ mode: 'reply', reason: 'flag-off' })
   }
 
-  // ===== 路径 1.5（v0.1.27+）：短内容 + --final → 不建卡，直接文本 reply =====
-  // 适用：主会话 inline 短结论 / worker 一次性 finalize 短内容 / 占位 "好" 等。
-  // 短消息不出卡片，避免视觉过重；超过阈值的长内容仍走流式卡片。
+  // ===== 路径 1.5（v0.1.30+）：单行内容 + --final → 不建卡，直接文本 reply =====
+  // 适用："好"/"Node v22.22.2"/"修改 3 个文件，测试通过 (8/8)" 等一句话短结论。
+  // 含换行（worker 写了排版）→ 卡片走流式；意图驱动而非长度驱动。
   if (!state && enabled && isFinal && typeof content === 'string'
-      && content.trim().length <= shortThreshold && status !== 'error') {
+      && content.trim() && !content.includes('\n') && status !== 'error') {
     sendPlainText({ replyTo: msgId, chatId, content })
     writeState(file, {
       mode: 'reply', terminal: 'done', createdAt: Date.now(),
-      reason: 'short-content', contentLen: content.length,
+      reason: 'single-line',
     })
-    return ok({ mode: 'reply', reason: 'short-content', contentLen: content.length })
+    return ok({ mode: 'reply', reason: 'single-line' })
   }
 
   // ===== 路径 2：首次调用 + flag 开 → 尝试建卡 =====

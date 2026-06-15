@@ -14,9 +14,16 @@ cc-bot/
 │   ├── base.js                  # IMAdapter 基类（接口定义，含 push 模式 startListening/stopListening）
 │   ├── lark.js                  # 飞书实现（包 lark-cli，polling 模式）
 │   └── slack.js                 # Slack 实现（@slack/socket-mode + @slack/web-api，push 模式 v0.1.12+）
-├── runtime/
+├── runtime/                    # 所有"决策 / 转换 / 状态管理"代码化的 CLI 工具（SKILL.md 调它们看返回 → 不再 prose 推理）
 │   ├── poll.js                  # 消息主进程（Monitor 托管）— 必须接 --project <abs>；IM_MODE='polling'(lark) / 'push'(slack)
-│   ├── slack-send.js            # 跨平台 Slack Web API helper（v0.1.12+ 规避 Win curl GBK 乱码 + token 暴露）
+│   ├── slack-send.js            # 跨平台 Slack Web API helper（v0.1.12+ 规避 Win curl GBK 乱码 + token 暴露；v0.1.30+ 自动 redact）
+│   ├── streaming-card.js        # v0.1.22+ Feishu CardKit v2 流式卡片 driver — worker 调 `report` 统一入口，CLI 内部按 profile + 内容长度自动选 卡片 / 文本 / 降级，自动 redact 自动脱敏
+│   ├── permission.js            # v0.1.23+ 角色 + intent level 判定（admin_open_ids 白名单 + intent_permissions 表 + 高危名字防御），SKILL §权限矩阵 代码化
+│   ├── intent.js                # v0.1.23+ intent 解析 — 占位符替换（<project.root> 等）+ 动态可用清单 + doc_progress 文件存在校验
+│   ├── redact.js                # v0.1.24+ 文本脱敏 — slack token / Bearer / JWT / app_secret / 飞书 cli_/ou_/om_ ID / 邮箱 / 手机号 / profile.privacy.blocklist 真名；lark + slack 发群入口自动调
+│   ├── ack-detect.js            # v0.1.24+ 短消息 ACK 语义判定（yes/continue/ok/thanks + 停止词否决）+ 建议回复
+│   ├── dispatch.js              # v0.1.25+ agents.json 调度生命周期（evaluate / register / complete / ls）— tags 冲突 + slot + 同 user 串行全代码化
+│   ├── profile-migrate.js       # v0.1.29+ 版本化 profile schema migration — setup 跑 apply backfill 历史新增字段，doctor 跑 check 列 missing
 │   ├── statusline.js            # CC statusLine shim — 把 HUD stdin 落盘到 .cc-bot/runtime/hud-stdin.json
 │   ├── main-busy.js             # CC UserPromptSubmit/Stop hook — 写/删 .cc-bot/runtime/main-busy.lock（v0.1.6+）
 │   └── check-image-size.js      # 图片维度门禁（v0.1.11+ 防 Claude API 2000px dimension_limit 阻塞）

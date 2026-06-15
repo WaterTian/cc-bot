@@ -13,9 +13,8 @@
     "busy_reaction": "",
     "debug": false,
     "streaming_card": {
-      "_comment": "v0.1.22+ 流式卡片（仅 lark）。enabled=true 时**仅 worker subagent 派工路径走卡片**（worker 派的长任务 = 跨文件改 / 跑测试 / 部署等）；主会话 inline 短回复（查询 / 状态 / typo 修复 / ACK 等）仍走普通 +messages-reply 文本——卡片是【重活在跑】的视觉信号，短消息不出卡避免视觉过重。short_threshold（默认 100 字符）控制 worker 内部：worker 一次性 --final 写短结论也走文本 reply，长结论才出卡。开启前提：① lark-cli ≥ 1.0.47（cardkit:card:write scope 已注册） + ② 飞书客户端 ≥ 7.20（CardKit v2 流式渲染需求；旧客户端看到「请升级飞书」占位）。",
-      "enabled": false,
-      "short_threshold": 100
+      "_comment": "v0.1.22+ 流式卡片（仅 lark）。enabled=true 时**仅 worker subagent 派工路径走卡片**（worker 派的长任务 = 跨文件改 / 跑测试 / 部署等）；主会话 inline 短回复（查询 / 状态 / typo 修复 / ACK 等）仍走普通 +messages-reply 文本——卡片是【重活在跑】的视觉信号，短消息不出卡避免视觉过重。v0.1.30+ 判据：worker 一次性 --final 内容含换行 = 想排版展示 → 卡片；单行 = 一句话答 → 文本。开启前提：① lark-cli ≥ 1.0.47（cardkit:card:write scope 已注册） + ② 飞书客户端 ≥ 7.20（CardKit v2 流式渲染需求；旧客户端看到「请升级飞书」占位）。",
+      "enabled": false
     },
     "bot_app_id": "cli_xxxxxxxxxxxx",
     "bot_open_id": "",

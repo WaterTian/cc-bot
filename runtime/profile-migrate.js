@@ -38,7 +38,8 @@ const MIGRATIONS = [
   { version: '0.1.24', path: 'privacy',                            default: {} },
   { version: '0.1.24', path: 'privacy.blocklist',                  default: [] },
   { version: '0.1.24', path: 'privacy.blocklist_replace',          default: '<同事>' },
-  { version: '0.1.27', path: 'im.streaming_card.short_threshold',  default: 100 },
+  // v0.1.27 曾加 im.streaming_card.short_threshold=100；v0.1.30 改为换行判据，字段不再被读取。
+  // migration 移除——老 profile 留着此字段无害（代码不读），新 profile 不再 backfill。
 ]
 
 function getPath(obj, dotPath) {

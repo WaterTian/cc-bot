@@ -27,6 +27,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const redact = require('./redact')
 
 function parseArgs(argv) {
   const out = { _: [] }
@@ -93,8 +94,11 @@ async function main() {
     switch (cmd) {
       case 'send-text': {
         if (!args.text) fail('send-text: --text required')
+        // v0.1.30+：自动脱敏（跟 lark 端 streaming-card.js 一致）
+        // 替换 token / 真名 / 飞书 ID / 邮箱 / 手机号等敏感串，profile.privacy.blocklist 自定义真名
+        const scrubbed = redact.text(String(args.text), profile)
         // 主流强制：不接受 --reply-to（即使 LLM 误传也忽略）
-        const r = await adapter.sendText({ chatId, text: String(args.text) })
+        const r = await adapter.sendText({ chatId, text: scrubbed })
         jsonOut({ ok: true, ts: r.id })
         break
       }

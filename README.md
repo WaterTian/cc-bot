@@ -88,11 +88,16 @@ CC-BOT 是一个 **Claude Code 插件**，监听 IM 群消息，把自然语言�
 
 <table>
 <tr>
-  <td align="center" width="20%"><h3>◨</h3><b>Interactive Setup</b><br/><sub>guided wizard<br/>auto-detect IDs</sub></td>
-  <td align="center" width="20%"><h3>◐</h3><b>IM-agnostic</b><br/><sub>Lark · Slack<br/>adapter pattern</sub></td>
-  <td align="center" width="20%"><h3>◉</h3><b>Per-project Intents</b><br/><sub>JSON-defined<br/>Claude executes</sub></td>
-  <td align="center" width="20%"><h3>▣</h3><b>Crash-resistant</b><br/><sub>3-layer defense<br/>PID lock · EPIPE · state heal</sub></td>
-  <td align="center" width="20%"><h3>█▌</h3><b>HUD-aware</b><br/><sub>statusline shim<br/>tees cc-hud if installed</sub></td>
+  <td align="center" width="25%"><h3>●</h3><b>Streaming Cards</b><br/><sub>Lark CardKit v2 typewriter<br/>三态 header（蓝→绿/红）<br/>实时打字 + 耗时收尾</sub></td>
+  <td align="center" width="25%"><h3>◨</h3><b>Interactive Setup</b><br/><sub>guided wizard · auto-detect IDs<br/>profile schema 自动 backfill</sub></td>
+  <td align="center" width="25%"><h3>◐</h3><b>IM-agnostic</b><br/><sub>Lark · Slack<br/>capability-based adapter</sub></td>
+  <td align="center" width="25%"><h3>◉</h3><b>Per-project Intents</b><br/><sub>JSON 自定义动作<br/>含 permission 分级</sub></td>
+</tr>
+<tr>
+  <td align="center" width="25%"><h3>⊙</h3><b>Auto Redact</b><br/><sub>token / 真名 / 飞书 ID /<br/>邮箱 / 手机号 发群前强制 scrub</sub></td>
+  <td align="center" width="25%"><h3>▣</h3><b>Crash-resistant</b><br/><sub>3-layer defense<br/>PID lock · EPIPE · state heal</sub></td>
+  <td align="center" width="25%"><h3>⊕</h3><b>Code-driven</b><br/><sub>permission / intent / dispatch /<br/>redact 全代码化，prose 不膨胀</sub></td>
+  <td align="center" width="25%"><h3>█▌</h3><b>HUD-aware</b><br/><sub>statusline shim<br/>tees cc-hud if installed</sub></td>
 </tr>
 </table>
 
@@ -137,12 +142,14 @@ When a new release is announced, run these in **each project** using cc-bot:
 /cc-bot:doctor                       # verify: first line prints "cc-bot v<new-version>"
 ```
 
-- **Before / after upgrading** — run `/cc-bot:doctor`; it flags version drift, stale permissions, profile issues, and confirms the active version.
+- **Before / after upgrading** — run `/cc-bot:doctor`; it flags版本漂移 / stale permissions / **profile schema missing fields**（v0.1.29+）/ **lark-cli 版本与 cardkit scope**（v0.1.29+）。
 - **If the bot is running** — `/cc-bot:stop` **before** updating, `/cc-bot:start` **after**; `/reload-plugins` does **not** update an already-running Monitor.
-- **Re-run `/cc-bot:setup` after upgrading** — idempotent (skips what's already done); refreshes anything a release introduced (Monitor permission rule, main-window hooks, IM picker). Always safe.
+- **Re-run `/cc-bot:setup` after upgrading** — idempotent (skips what's already done); refreshes anything a release introduced (Monitor permission rule, main-window hooks, IM picker, **profile schema backfill via `runtime/profile-migrate.js`** v0.1.29+). Always safe.
 
 > [!NOTE]
-> **Why re-running setup matters** — `/cc-bot:setup` auto-registers a wildcard permission rule (`Bash(node .../cc-bot/*/runtime/*.js *)`) so version upgrades never re-prompt for Monitor launch, and registers main-window hooks into `~/.claude/settings.json` (the §Updating commands above only pull code, not user-global settings).
+> **Why re-running setup matters** — `/cc-bot:setup` 自动跑：① 注册 Monitor 通配权限规则避免每次升级再弹权限询问；② 注册 main-window hooks 进 `~/.claude/settings.json`；③ **`profile-migrate.js apply` backfill 历史新增字段**（如 `busy_placeholder` v0.1.19 / `busy_reaction` v0.1.21 / `streaming_card` v0.1.22 / `intent_permissions` v0.1.23 / `privacy.blocklist` v0.1.24 等），不覆盖你已设的值。
+>
+> **lark-cli scope 漂移**（v0.1.22+ 流式卡片要求 `cardkit:card:write` + `cardkit:card:read`）—— 升级 lark-cli 后必须 `lark-cli auth login --scope "cardkit:card:write cardkit:card:read"` 重新拿 token，否则 streaming card 调不动。`/cc-bot:doctor` 会显式检查这两个 scope。
 >
 > **Switching a project to Slack** (v0.1.12+) — install the SDK (`npm i -g @slack/socket-mode @slack/web-api`), then re-run `/cc-bot:setup`; the wizard starts with an IM picker. One project = one IM.
 
@@ -213,20 +220,37 @@ Main session ── Monitor(persistent) ── node poll.js ── lark: every 3
                                                     ├─ dedupe via state.last_processed_time + poll.emitted
                                                     └─ stdout: NEW_MSG|msg_id|sender|text|ts
                                                                ↓ Monitor → notification
-                                                         main session → intent routing → adapter.sendText
-
-CC's statusLine ── cc-bot shim ── write hud-stdin.json (for bot's HUD intent)
-                                └─ tee cc-hud (optional, for status bar rendering)
+                                                         main session → permission.js check → intent.js resolve
+                                                                      → dispatch.js register（slot/tags/serial）
+                                                                      → spawn worker subagent
+                                                                            ↓
+                                                worker → streaming-card.js report（lark）
+                                                       → slack-send.js send-text（slack）
+                                                       → redact.js 自动脱敏（两路径强制）
 ```
 
 <table>
 <tr>
-  <td align="center"><b>HTTP polling (lark)</b><br/><sub>30s fixed interval<br/>VPN-proxy safe<br/>no WS disconnect</sub></td>
-  <td align="center"><b>Socket Mode push (slack)</b><br/><sub>WebSocket event-driven<br/>no rate-limit on history<br/>mainBusy still emits</sub></td>
-  <td align="center"><b>3-layer defense</b><br/><sub>PID lockfile<br/>stdout EPIPE self-kill<br/>state future-value heal</sub></td>
-  <td align="center"><b>Per-project isolation</b><br/><sub>.cc-bot/ per project<br/>profiles · runtime · bot_temp<br/>zero cross-contamination</sub></td>
+  <td align="center"><b>HTTP polling (lark)</b><br/><sub>30s fixed interval · VPN-proxy safe</sub></td>
+  <td align="center"><b>Socket Mode push (slack)</b><br/><sub>WebSocket event-driven<br/>mainBusy still emits</sub></td>
+  <td align="center"><b>3-layer defense</b><br/><sub>PID lockfile · EPIPE self-kill<br/>state future-value heal</sub></td>
+  <td align="center"><b>Per-project isolation</b><br/><sub>.cc-bot/ per project<br/>zero cross-contamination</sub></td>
 </tr>
 </table>
+
+### Code-driven decisions（v0.1.22+ runtime/）
+
+| 工具 | 用途 |
+|---|---|
+| `runtime/streaming-card.js` | Lark CardKit v2 流式卡片 driver — 单一 `report` 入口，CLI 内部按 profile + 内容形态自动选 卡片 / 文本 / 降级 reply，自动脱敏 |
+| `runtime/permission.js` | 角色判定 + intent level 映射（`public` / `admin` / `admin-confirm` / `group-rejected`），含高危名字防御启发式 |
+| `runtime/intent.js` | intent 解析：占位符替换（`<project.root>` / `<paths.bot_temp_abs>` 等）+ 动态可用清单（doc_progress 文件存在校验）|
+| `runtime/redact.js` | 文本脱敏（slack token / Bearer / JWT / `app_secret=*` / 飞书 cli_/ou_/om_ ID / 邮箱 / 手机号 / blocklist 真名）—— lark + slack 发群入口强制调 |
+| `runtime/ack-detect.js` | 短消息 ACK 语义判定（yes / continue / ok / thanks + 停止词否决）+ 推荐回复 |
+| `runtime/dispatch.js` | agents.json 调度生命周期（evaluate / register / complete）— tags 冲突 + slot + 同 user 串行全代码化 |
+| `runtime/profile-migrate.js` | 版本化 profile schema migration — 升级时自动 backfill 历史新增字段，不覆盖用户已设值 |
+
+**设计原则**：决策、转换、状态管理代码化，prose（SKILL.md / worker.md）只描述"调哪个命令、按返回 action 走"，**LLM 推理负担和文档膨胀双降**。
 
 <br/>
 
@@ -256,9 +280,22 @@ Each project has its own `.cc-bot/profiles/active.json`. The `intents` dict maps
     "run_tests": "Run `npm test`, report pass/fail counts + first failure trace",
     "query_logs": "Use mcp__cloudbase__logs to fetch last 20 error logs, summarize",
     "build_preview": "Run `npm run build:preview`, upload artifact to <paths.bot_temp_abs>, reply with link"
+  },
+  "intent_permissions": {
+    "deploy": "admin",
+    "drop_data": "admin-confirm"
   }
 }
 ```
+
+`intent_permissions`（v0.1.23+，可选）声明每个 intent 的权限级别：
+
+- `public` — 任何群成员可触发（默认）
+- `admin` — 仅 `members.admin_open_ids` 白名单可执行
+- `admin-confirm` — 即使 admin 也需口头确认一次（破坏性操作）
+- `group-rejected` — 群里发一律拒（bot 开关类）
+
+未声明的项目 intent，**名字含 `deploy` / `publish` / `release` / `drop_*` / `delete_*` / `reset_*` / `restart_*` / `prod*` 等高危词时自动默认 `admin`**（防 legacy profile 把生产操作意外公开），其他默认 `public`。
 
 Works for **any project type** — Web / mini-program / Node service / Python data pipeline / mobile app. If you can script it, you can intent-route it.
 
@@ -299,7 +336,21 @@ cc-bot ships with **Lark + Slack**. Adding WeCom / DingTalk / Discord / Telegram
 
 ## Privacy Protection
 
-Repo ships a pre-commit scanner that blocks real IM IDs (`cli_*` / `ou_*` / `oc_*` / `om_*`) / real-name blocklist / api-secret patterns from entering commits. One-time setup — see CLAUDE.md §Git 提交隐私防护.
+**两层防御**：
+
+**① Runtime auto-redact（v0.1.24+）** — `runtime/redact.js` 在所有发群路径（`streaming-card.js report` / `slack-send.js send-text`）入口自动过一遍 scrub：
+
+| 敏感串类型 | 替换为 |
+|---|---|
+| Slack token (`xoxb-*` / `xapp-*`) | `<redacted:slack_xoxb>` / `<redacted:slack_xapp>` |
+| Bearer / JWT / `app_secret=*` / `api_key=*` | `<redacted:bearer>` / `<redacted:jwt>` / `<redacted:secret_kv>` |
+| 飞书 ID (`cli_*` / `ou_*` / `om_*`) | `<redacted:lark_app_id>` / `<redacted:lark_open_id>` / `<redacted:lark_msg_id>` |
+| 邮箱 / 中国手机号 | `<redacted:email>` / `<redacted:phone_cn>` |
+| `profile.privacy.blocklist` 自定义真名 | `<同事>`（可改 `blocklist_replace`）|
+
+worker 不需要手动调；CLI 强制脱敏，无遗漏路径。
+
+**② Pre-commit hook（开发本仓库时装）** — 阻塞真实 IM ID / 黑名单真名 / api-secret 进 git commit。一次性 setup 见 CLAUDE.md §Git 提交隐私防护.
 
 <br/>
 
