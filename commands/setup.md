@@ -487,6 +487,28 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
       - 路径刷新（旧 main-busy 命令被替换）→ `✓ main-busy hook 路径已刷新（旧：{old} → 新：{current}）`
       - 新增但保留了其他 hook → `✓ 已追加 main-busy hook（保留你现有的其他 {event} hook）`
 
+8.5. **注册 todo-bridge hook**（v0.1.32+）—— 让主会话调 `TodoWrite` / `TaskCreate` / `TaskUpdate` 时自动把 todo 状态变化 mirror 到当前 running 任务的流式卡片上，群里实时看到 `▸ <进行中> / ✓ <完成>`。
+
+   **触发机制**：主会话用 TodoWrite 跟踪派工任务的子步骤（CC 标准行为）→ PreToolUse hook 截获 payload → `runtime/todo-bridge.js` 读 `agents.json` 找当前 running 的 msg_id（仅 length === 1 时清晰） → diff todos 列表 → spawn `streaming-card.js report` detached 异步推卡片。Worker 端零负担（worker 没 TodoWrite 工具，也不需要），cwd 不含 `.cc-bot/` 或 streaming_card 未开时静默跳过，对其他项目无副作用。
+
+   a. Read `~/.claude/settings.json`（沿用 step 8 同文件）。
+   b. 目标 hook 配置（注入到 `hooks.PreToolUse` 数组里，跟现有 main-busy hook 同模式）：
+      ```json
+      {
+        "matcher": "TodoWrite|TaskCreate|TaskUpdate",
+        "hooks": [
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/runtime/todo-bridge.js" }
+        ]
+      }
+      ```
+   c. 幂等合并：扫 `hooks.PreToolUse[]` 数组，若任一条目的 `.hooks[].command` 含 `todo-bridge.js`：
+      - 完全等于目标字符串 → 跳过
+      - 路径不同 → 替换该 command 为当前目标
+      - 未找到 → append 新 matcher 条目
+   d. Tell user：
+      - 首次注册 → `✓ 已注册 todo-bridge hook 到 ~/.claude/settings.json（主会话 TodoWrite 自动同步到流式卡片）`
+      - 幂等跳过 → `✓ todo-bridge hook 已就位（跳过）`
+
 9. **注册 Monitor 通配权限**到 `<project>/.claude/settings.local.json`，让 cc-bot 版本升级后不再被 CC 反复询问权限。
 
    a. Read `<project>/.claude/settings.local.json`。文件缺失 → 初值 `{}`；解析失败 → 直接报错「settings.local.json 格式错误，请先修复」并跳过本步（不能强写覆盖用户数据）。
@@ -576,6 +598,7 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
     - 若 `active.json` 的 `polling_mode` 字段缺失或空 → 按 Stage E step 4 的检测逻辑（读 `ANTHROPIC_BASE_URL` env）补写（幂等，可重复）
     - 若 `settings.json` 的 `statusLine.command` 未指向 cc-bot shim → 跑步骤 7 补注册（幂等，可重复）
     - 若 `settings.json` 的 `hooks.UserPromptSubmit` / `hooks.Stop` 无 cc-bot main-busy 命令 → 跑步骤 8 补注册（幂等）
+    - 若 `settings.json` 的 `hooks.PreToolUse` 无 cc-bot todo-bridge 命令（v0.1.32+）→ 跑步骤 8.5 补注册（幂等）
     - 若 `.claude/settings.local.json` 无 Monitor 通配权限规则 → 跑步骤 9 补注册（幂等）
 
 用户任何阶段失败后修好，再发 `/cc-bot:setup` 会自动从断点续跑。

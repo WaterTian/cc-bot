@@ -116,6 +116,13 @@ Execute checks in parallel where possible. Collect results, then print one unifi
   - `true` 或缺失 → ℹ 占位已启用（per-lock 去重 + 5min 全局节流；降级心跳保留）
   - `false` → ℹ 占位已关闭（主会话忙碌时群里不再发占位；卡死场景也不会发降级心跳，需自己监 events.log）
 
+### 5c. Todo-bridge hook (`~/.claude/settings.json`, v0.1.32+)
+
+同一份 `~/.claude/settings.json`，查 `hooks.PreToolUse` 数组中是否有 matcher 含 `TodoWrite|TaskCreate|TaskUpdate` + command 含 `todo-bridge.js`：
+- 存在且路径与当前版本对齐 → ✓ 主会话 TodoWrite 自动 mirror 到流式卡片
+- 存在但路径过期（指向旧 cache 版本号或本地开发仓）→ ⚠ 建议重跑 `/cc-bot:setup`（step 8.5 会刷新路径）
+- 不存在 → ℹ 未注册（worker 派工进度仅靠 worker 自报 `streaming-card.js report`，丢主会话 TodoWrite 这条 mirror 通道）→ 建议重跑 `/cc-bot:setup`（step 8.5 会幂等注册）
+
 ### 6. lark-cli
 
 - `lark-cli --version` 成功？✗ if not found → `npm i -g @larksuite/cli`

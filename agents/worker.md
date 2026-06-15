@@ -45,6 +45,8 @@ effort: xhigh
 
   worker 工作时**每完成一个独立动作 / 切换阶段就调一次 report**（不带 `--final`），把当前进度推到群里——**像跟群里人说话一样自然**，**禁止把所有进度攒到最后一次 `--final` 集中发**（用户在群里只能看到"已完成"，丢失全部流式价值，2026-06-15 实测翻车）。
 
+  > **v0.1.32+ 双路径协作**：主会话调度 worker 时会自然用 TodoWrite 跟踪子步骤（CC 标准做法），`runtime/todo-bridge.js` PreToolUse hook 自动 diff todos 变化 mirror 到这张卡（▸ pending / ✓ completed）。**worker 端的 report 跟 hook bridge 互补**：hook 覆盖主会话视角的"任务清单状态"；worker 的 report 覆盖"内部跑到哪了 / 长 Bash 在干啥 / hero 关键结论"——hook 看不到 worker 内部，worker 不能甩手交给 hook。
+
   ### 强制触发点
 
   以下时点**必须**至少各调一次 report：

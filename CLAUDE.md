@@ -24,6 +24,7 @@ cc-bot/
 │   ├── ack-detect.js            # v0.1.24+ 短消息 ACK 语义判定（yes/continue/ok/thanks + 停止词否决）+ 建议回复
 │   ├── dispatch.js              # v0.1.25+ agents.json 调度生命周期（evaluate / register / complete / ls）— tags 冲突 + slot + 同 user 串行全代码化
 │   ├── profile-migrate.js       # v0.1.29+ 版本化 profile schema migration — setup 跑 apply backfill 历史新增字段，doctor 跑 check 列 missing
+│   ├── todo-bridge.js           # v0.1.32+ CC PreToolUse hook bridge — 主会话 TodoWrite/TaskCreate/TaskUpdate 触发时自动 diff todos → spawn streaming-card.js 把进度推到当前 running 任务的卡片（worker 端零负担，hook 异步 detached 不阻塞主会话）
 │   ├── statusline.js            # CC statusLine shim — 把 HUD stdin 落盘到 .cc-bot/runtime/hud-stdin.json
 │   ├── main-busy.js             # CC UserPromptSubmit/Stop hook — 写/删 .cc-bot/runtime/main-busy.lock（v0.1.6+）
 │   └── check-image-size.js      # 图片维度门禁（v0.1.11+ 防 Claude API 2000px dimension_limit 阻塞）
