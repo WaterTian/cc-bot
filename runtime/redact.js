@@ -3,7 +3,7 @@
 //
 // 群消息发送前过一遍，强制替换 token / 真名 / 长 hex ID 等敏感串。
 // 当前靠 worker LLM 自觉「禁出现 token / 真名」，code 强制后零依赖。
-// 设计参考：cc-connect core/redact.go
+// 设计参考：通用 PII / secret scrubbing 模式
 //
 // 接口：
 //   redact.text(input, profile)

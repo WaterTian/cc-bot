@@ -15,7 +15,7 @@
 //      无 --final → PUT /cards/{id}/elements/streaming_content/content（typewriter 累加）
 //      有 --final → 整卡 PUT /cards/{id} 替换（翻 header 蓝→绿/红 + 关 streaming_mode + 上最终内容）
 //
-// 设计：仿 Claude-to-IM 单 markdown 元素 + element_id:'streaming_content' + 全文累积；
+// 设计：单 markdown 元素 + element_id:'streaming_content' + 全文累积；
 //      sequence 自管，Feishu 9499 / cc-bot 2026-06-15 实测踩过的 settings 嵌套坑直接绕过。
 
 const { execSync } = require('child_process')
@@ -111,8 +111,8 @@ function buildCard({ content, streaming, summary, terminal, elapsedMs }) {
     body: {
       elements: [
         { tag: 'markdown', element_id: ELEMENT_ID, content: text, text_align: 'left' },
-        { tag: 'hr' },
-        { tag: 'markdown', content: footerText, text_size: 'notation', text_align: 'right' },
+        { tag: 'hr', margin: '8px 0 8px 0' },
+        { tag: 'markdown', content: footerText, text_size: 'notation', text_color: 'grey', text_align: 'right' },
       ],
     },
   }
@@ -128,6 +128,14 @@ function formatElapsed(ms) {
   const h = Math.floor(m / 60)
   const rm = m % 60
   return rm ? `${h}h ${rm}m` : `${h}h`
+}
+
+// v0.1.30 noop：Feishu CardKit 的 markdown 元素原生支持完整 markdown 语法
+// （`-`/`*` 无序列表 / `1.` 有序 / `**bold**` / `` `code` `` / `### heading` / `> quote` /
+//  ` ``` fenced ``` ` 等）。早期 A2 设计把 `- ` 替换为 `▸ ` 反而 downgrade 了原生列表样式，已撤回。
+// 函数保留作为后续扩展点（比如统一英文标点 / 自动 inline code 等），目前 passthrough。
+function prettifyContent(s) {
+  return s
 }
 
 function truncate(s, max) {
@@ -298,7 +306,7 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
     }
     let cardId, messageId
     try {
-      const card = buildCard({ content: initState.content, streaming: true, summary: summaryFor(initState) })
+      const card = buildCard({ content: prettifyContent(initState.content), streaming: true, summary: summaryFor(initState) })
       cardId = createCardEntity(card)
       messageId = sendCardMessage({ cardId, replyTo: msgId, chatId })
     } catch (e) {
@@ -346,7 +354,7 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
   // 中途 update
   state.sequence += 1
   try {
-    updateCardContent({ cardId: state.cardId, content: state.content || '🧠 思考中...', sequence: state.sequence })
+    updateCardContent({ cardId: state.cardId, content: prettifyContent(state.content) || '🧠 思考中...', sequence: state.sequence })
     writeState(file, state)
     return ok({ mode: 'card', sequence: state.sequence, action: 'updated' })
   } catch (e) {
@@ -366,7 +374,7 @@ function doFinalize({ state, file, content, status, errorMsg }) {
   state.sequence += 1
   const elapsedMs = state.createdAt ? Date.now() - state.createdAt : 0
   const finalCard = buildCard({
-    content: state.content,
+    content: prettifyContent(state.content),
     streaming: false,
     summary: summaryFor(state),
     terminal: state.terminal,
@@ -460,7 +468,7 @@ function main() {
 if (require.main === module) main()
 
 module.exports = {
-  buildCard, summaryFor, truncate, formatElapsed,
+  buildCard, summaryFor, truncate, formatElapsed, prettifyContent,
   readProfile, stateFilePath, readState, writeState,
   cmdReport,
   ELEMENT_ID, MAX_CONTENT_CHARS,
