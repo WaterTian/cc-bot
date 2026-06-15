@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.30] - 2026-06-15
+
+- feat: 换行判据 + slack 端 redact + 文档大同步
+
 ## [0.1.29] - 2026-06-15
 
 - feat: streaming-card 设计感升级（文本流 markdown 路线）+ profile migration
