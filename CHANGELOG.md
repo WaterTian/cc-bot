@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.33] - 2026-06-15
+
+- feat: dispatch.js 预热流式卡片 + 孤儿兜底 finalize（issue #15 / #13 / #16）
+
 ## [0.1.32] - 2026-06-15
 
 - feat: todo-bridge hook 自动 mirror 主会话 TodoWrite 到流式卡片
