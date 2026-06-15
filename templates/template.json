@@ -61,6 +61,10 @@
     "_comment": "项目特定意图：每个键是一个自然语言意图触发的动作描述。bot 识别群消息意图后按 profile.intents.<key> 描述执行。键名由你定，越具体越好。常见示例（按需复制，不需要的删掉）：\n- 'deploy': '用 bash scripts/deploy.sh 部署到生产'\n- 'run_tests': '跑 npm test 并汇报通过数 / 失败数'\n- 'query_logs': '用 mcp__cloudbase__logs 查最近 N 条错误日志'\n- 'compile_preview': '小程序场景：mcp__wechat-devtools__preview 出二维码，输出到 <paths.bot_temp_abs>/preview-qr.png，lark-cli +messages-send --image <paths.bot_temp_rel>/preview-qr.png'\n未列入的意图会被 bot 回「当前项目未配置该操作」"
   },
 
+  "intent_permissions": {
+    "_comment": "v0.1.23+ 可选：声明 intent key 的权限级别（'public' | 'admin' | 'admin-confirm' | 'group-rejected'）。未列入的项目 intent 默认 'public'。内置 intent（hud / help / query_progress / query_todo / visual_bug_report / bot_switch）已在代码内置，profile 这里只管 profile.intents 里的项目 intent。示例：deploy admin、drop_db admin-confirm"
+  },
+
   "self_poll_interval": "3m",
   "mcp_required": [],
   "notes": ""

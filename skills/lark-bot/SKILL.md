@@ -211,102 +211,63 @@ Bot is going to sleep — group messages won't be handled
 
 ## 角色与权限
 
-### 角色判定（白名单单源）
+**角色判定**：`profile.members.admin_open_ids` 白名单，命中 = admin，否则 = member。单一事实源，无 cache 无回填。
 
-**单一事实源：** `profile.members.admin_open_ids` 白名单。
+**群里称呼**：回复**不具名**，飞书 `+messages-reply` 自带原消息引用，sender 群里看得见，bot 不复述。主动通知用 `@all` 或 mention `open_id`（不用 name）。
 
-```
-sender open_id ∈ admin_open_ids → admin
-否则                           → member
-```
+**权限判定（v0.1.23+ 代码化）**：派工前调一次 `permission.js`，按返回 `decision` 走：
 
-无运行时 cache、无回填、无双重门槛。新消息直接查白名单一行得出 role。
-
-### 群里称呼
-
-**回复时不具名，依赖 reply 引用上下文。** 飞书 `+messages-reply` 自带原消息引用，群里看得见 sender，bot 不需要复述。
-
-```
-> [李项目 14:20] 19 是啥任务
-> [bot reply 14:21] 19 是盲盒 banner 联调任务
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/runtime/permission.js check \
+  --project <项目根> --sender <ou_xxx> --intent <key>
+# → {"decision":"allow|reject|confirm-needed|group-rejected","role":"admin|member","level":"...","reason":"..."}
 ```
 
-而不是「李项目，19 是…」具名重复。
+- `allow` → 直接派工
+- `confirm-needed` → 写 `pending_confirm`（15min 超时），回群让用户答 `Y/确认`
+- `reject` → 回 `reason`（如"该操作需管理员授权"）
+- `group-rejected` → bot 开关等敏感指令一律拒（详见 §开关指令的来源限制）
 
-主动发起（非 reply）的通知改用 `@all` 或不 @ 任何人；个人 @ 通知必要时用 mention 语法直接 @ open_id（不需要 name）。
+intent → level 映射规则（代码内置 + profile 可覆盖）：
 
-### 权限矩阵（按 intent 类别，具体键由 profile.intents 自定义）
+| 来源 | 默认 level | 覆盖方式 |
+|---|---|---|
+| 内置 intent（hud / help / query_progress / query_todo / visual_bug_report / unknown） | `public` | 不可覆盖 |
+| 内置 intent（bot_switch） | `group-rejected` | 不可覆盖 |
+| 项目 intent（`profile.intents.<key>`） | `public` | `profile.intent_permissions.<key>: 'public' | 'admin' | 'admin-confirm' | 'group-rejected'` |
 
-| 类别 | 权限 | 说明 |
-|------|------|------|
-| 查询类（进度 / 待办 / 状态 / HUD / 帮助 / 其他只读查询） | public | 读文档、读缓存、读第三方 API |
-| 非破坏性的执行类（编译 / 预览 / 跑测试 / 查日志 / 生成二维码 / 页面巡检等） | public | 按 `profile.intents.<key>` 描述执行，无副作用 |
-| 修改非生产代码（前端视图 / 本地脚本 / 非关键配置） | public | 编辑 `profile.tech_stack.*` 字段指向的代码路径 |
-| 修改关键代码 / 部署类（部署生产 / 推送线上 / 改关键配置） | admin-auto | 按 `profile.intents.<key>` 执行，仅 admin 可用；执行前回纯文本占位，完工报结果 |
-| 写类外部资源（数据库写 / 删文件 / 清缓存 / 上传新版本 / 重启服务） | admin-auto | 同上 |
-| 破坏性操作（删全量数据 / force-push master / drop database / 删关键文件等） | admin-confirm | 即使 admin 也口头确认一次 |
+**典型项目级声明**（profile.intent_permissions 示例）：
 
-**权限档位含义：**
+```json
+{ "deploy": "admin", "drop_db": "admin-confirm", "query_logs": "public" }
+```
 
-- `public` — 所有人可用，无需确认
-- `admin-auto` — 仅 admin（open_id 在 `profile.members.admin_open_ids` 白名单），自动执行（跳过 `pending_confirm`），执行前回一句纯文本占位，完工反馈结果
-- `admin-confirm` — 即使 admin 也需口头确认一次
-- `member` 触发 `admin-*` 操作一律拒绝，回"该操作需管理员授权"
+未在 `intent_permissions` 声明的项目 intent，默认按 **intent 名启发式**判定：名字匹配 `deploy*` / `publish*` / `release*` / `push_to_*` / `drop_*` / `delete_*` / `remove_*` / `reset_*` / `restart_*` / `kill_*` / `purge_*` / `prod*` / `*-deploy` / `*-prod` 等高危词 → 默认 `admin`（安全兜底，防 legacy profile 把部署类意图意外公开）；其他 → 默认 `public`。想放开高危名字给非 admin 调，显式声明 `intent_permissions.<key>: 'public'`。
 
 ## 意图路由
 
-Claude 用自然语言理解判定意图，不做关键词匹配。
+LLM 用语义理解匹配用户消息到 intent key，不做关键词硬编码。
 
-### 通用意图（所有 profile 共享）
+**通用 intent**（cc-bot 自带）：`hud` / `help` / `query_progress` / `query_todo` / `visual_bug_report` / `bot_switch` / `unknown`。
 
-| 意图 | 触发示例 | 操作 |
-|------|---------|------|
-| `query_progress` | "进度怎样"、"做到哪了" | 读 `{profile.project.root}/{profile.project.doc_progress}` |
-| `query_todo` | "待办"、"还有什么没做" | 从 doc_progress 提取未完成项 |
-| `hud` | "状态"、"HUD" | 推送会话状态（见 §HUD） |
-| `help` | "帮助"、"能做什么" | 返回**可用**操作列表（按 §帮助动态筛选规则） |
-| `bot_switch` | "关闭bot"、"暂停" | **拒绝**，回"开关指令请从 Claude Code 主会话发起" |
-| `visual_bug_report` | 文字 + 截图（含 `[Image: img_xxx]`） | 下载图片 → Read → 结合文字判意图 |
-| `unknown` | 无法识别 | 回"无法识别该指令，发送「帮助」查看支持的操作" |
+**项目 intent**：`profile.intents.<key>`，键名自定义。典型示例：`deploy` / `run_tests` / `query_logs` / `compile_preview` / `check_build`。
 
-### 项目特定意图（从 `profile.intents` 读取）
+**resolve / list 都走代码**（占位符替换 + doc_progress 文件存在检查 + 非空过滤自动处理）：
 
-键名由项目自定义（无预设清单）—— 每个键是一条"自然语言意图 → 具体动作"的映射，Claude 用语义理解匹配群消息意图到 key，再按 `profile.intents.<key>` 的描述执行。
+```bash
+# 把 intent key 解析成「替换好占位符的可执行动作描述」
+node ${CLAUDE_PLUGIN_ROOT}/runtime/intent.js resolve --project <项目根> --key <intentKey>
+# → {"found":true,"description":"<占位符已替换的描述>","source":"builtin|project"}
+# found:false → 回"当前项目未配置该操作"
 
-**典型例子**（按需参考，不是强制清单）：
-- `deploy`: `用 bash scripts/deploy.sh 部署到生产`
-- `run_tests`: `跑 npm test 并汇报通过数 / 失败数`
-- `query_logs`: `用 mcp__cloudbase__logs 查最近 20 条错误日志`
-- `compile_preview`（小程序项目）: `用 mcp__wechat-devtools__preview 出二维码到 <paths.bot_temp_abs>/preview-qr.png，然后 lark-cli 发图`
-- `check_build`（Web / Node 项目）: `tail -50 build.log 看最后构建结果`
+# 'help' 意图触发时拿动态可用清单
+node ${CLAUDE_PLUGIN_ROOT}/runtime/intent.js list --project <项目根>
+# → {"items":[{"key":"...","hint":"...","source":"..."}, ...]}
+```
 
-profile 未定义的意图 → 回"当前项目未配置该操作，请检查 profile.intents"。
+LLM 职责收窄到「判语义匹配哪个 key」；占位符替换 / hint 摘要 / `doc_progress` 文件存在判断 / `_comment` 字段过滤全部在代码里。
 
-### 帮助动态筛选规则
-
-触发"帮助"意图时，**根据当前 profile 实际配置**动态生成清单，**不列不能用的意图**，避免用户"点了说未配置"的错路：
-
-| 意图类别 | 仅当以下条件满足才列出 |
-|---|---|
-| `query_progress` / `query_todo` | `profile.project.doc_progress` 非空且文件存在 |
-| 任意项目特定意图（`profile.intents.<key>`） | 该 key 对应的 value 是非空字符串（该动作已配置） |
-| `hud` / `help` | 永久可用（不依赖 profile 字段） |
-
-生成帮助文本时按 `profile.intents.<key>` 的**描述文字**摘 1 句人话展示（让群成员能看懂做什么），不要机械回显 key 名。
-
-**最小可用清单**（新项目刚 setup，intents 空 + doc_progress 空）只列 `状态 / 帮助` + 一句引导："可在 `.cc-bot/profiles/active.json` 的 intents 字段自定义意图开启更多能力"。
-
-#### 占位符约定
-
-`intents` / `notes` 描述里允许写尖括号占位，Claude 执行时按同名字段替换：
-
-| 占位 | 替换为 |
-|------|--------|
-| `<project.root>` | `profile.project.root` |
-| `<paths.bot_temp_abs>` | `profile.paths.bot_temp_abs`（绝对路径，给 MCP 的 qr_output 等用） |
-| `<paths.bot_temp_rel>` | `profile.paths.bot_temp_rel`（相对路径，给 lark-cli `--image` 用） |
-
-目的是让 intents 描述跨项目迁移时不用重写硬编码路径。template.json 已示范字段。
+支持的占位符（代码内置，加新占位直接改 `runtime/intent.js`）：`<project.root>` / `<project.doc_progress>` / `<paths.bot_temp_abs>` / `<paths.bot_temp_rel>` / `<chat_id>` / `<bot_app_id>`。
 
 ### 富文本（post）消息处理
 
