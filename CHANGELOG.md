@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.35] - 2026-06-16
+
+- refactor: 抽 streaming-card-policy.js 统一卡片策略 + register 加 preheated
+
 ## [0.1.34] - 2026-06-15
 
 - fix: streaming-card 字面 \n 自动转真换行 + worker.md 极简化
