@@ -18,11 +18,12 @@ cc-bot/
 │   ├── poll.js                  # 消息主进程（Monitor 托管）— 必须接 --project <abs>；IM_MODE='polling'(lark) / 'push'(slack)
 │   ├── slack-send.js            # 跨平台 Slack Web API helper（v0.1.12+ 规避 Win curl GBK 乱码 + token 暴露；v0.1.30+ 自动 redact）
 │   ├── streaming-card.js        # v0.1.22+ Feishu CardKit v2 流式卡片 driver — worker 调 `report` 统一入口，CLI 内部按 profile + 内容长度自动选 卡片 / 文本 / 降级，自动 redact 自动脱敏
+│   ├── streaming-card-policy.js # v0.1.35+ 单一事实源 — `canUseStreamingCard(profile)` 被 streaming-card / dispatch / todo-bridge 共用，去除 3 处 inline `im.type+enabled` 判断漂移
 │   ├── permission.js            # v0.1.23+ 角色 + intent level 判定（admin_open_ids 白名单 + intent_permissions 表 + 高危名字防御），SKILL §权限矩阵 代码化
 │   ├── intent.js                # v0.1.23+ intent 解析 — 占位符替换（<project.root> 等）+ 动态可用清单 + doc_progress 文件存在校验
 │   ├── redact.js                # v0.1.24+ 文本脱敏 — slack token / Bearer / JWT / app_secret / 飞书 cli_/ou_/om_ ID / 邮箱 / 手机号 / profile.privacy.blocklist 真名；lark + slack 发群入口自动调
 │   ├── ack-detect.js            # v0.1.24+ 短消息 ACK 语义判定（yes/continue/ok/thanks + 停止词否决）+ 建议回复
-│   ├── dispatch.js              # v0.1.25+ agents.json 调度生命周期（evaluate / register / complete / ls）— tags 冲突 + slot + 同 user 串行全代码化；v0.1.33+ register 同步预热流式卡片（首帧 6-10s → 1-2s, issue #15）+ complete 兜底 finalize 孤儿"● 处理中"卡
+│   ├── dispatch.js              # v0.1.25+ agents.json 调度生命周期（evaluate / register / complete / ls）— tags 冲突 + slot + 同 user 串行全代码化；v0.1.33+ register 同步预热流式卡片（首帧 6-10s → 1-2s, issue #15）+ complete 兜底 finalize 孤儿"● 处理中"卡；v0.1.35+ register 响应加 `preheated:bool`，SKILL.md 据此一行判要不要回群占位（不再 LLM 推 lark+flag）
 │   ├── profile-migrate.js       # v0.1.29+ 版本化 profile schema migration — setup 跑 apply backfill 历史新增字段，doctor 跑 check 列 missing
 │   ├── todo-bridge.js           # v0.1.32+ CC PreToolUse hook bridge — 主会话 TodoWrite/TaskCreate/TaskUpdate 触发时自动 diff todos → spawn streaming-card.js 把进度推到当前 running 任务的卡片（worker 端零负担，hook 异步 detached 不阻塞主会话）
 │   ├── statusline.js            # CC statusLine shim — 把 HUD stdin 落盘到 .cc-bot/runtime/hud-stdin.json

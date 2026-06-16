@@ -466,12 +466,12 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 30s 主
    node ${CLAUDE_PLUGIN_ROOT}/runtime/dispatch.js register \
      --project <项目根> \
      --task-json '{"msg_id":"<om_xxx>","user_open_id":"<ou_xxx>","user_name":"<name>","intent":"<key>","subject":"<可选 ≤60 字人类可读>","tags":[...]}'
-   # → {"action":"dispatch|queue|reject","reason":"...","taskId":"agent_om_xxx","queuePosition":N|null}
+   # → {"action":"dispatch|queue|reject","reason":"...","taskId":"agent_om_xxx","queuePosition":N|null,"preheated":bool}
    ```
 
    CLI 内部一次性原子完成：评估 slot 满 / tags 冲突 / 同 user 串行 → 写 `agents.json`（running 或 queue）→ 派单时同步预热卡片 → 返 action。**主会话不再手动 Edit agents.json**。
 
-   **subject 字段（v0.1.33+ 可选）**：把用户原句提炼成 ≤60 字一句话（比 intent description 更贴本次任务），写群里卡片的 hero。register 在 `action='dispatch'` + `im.type=lark` + `streaming_card.enabled` 时**同步预热卡片**（cardkit POST 从 worker 关键路径挪到 dispatch 侧，issue #15 首帧 10s → 1-2s）。3s 硬超时静默吞错，worker 自己兜底建卡。subject 缺省时回退到 `intent.resolveAction(key)` 首句。
+   **subject 字段（v0.1.33+ 可选）**：把用户原句提炼成 ≤60 字一句话（比 intent description 更贴本次任务），写群里卡片的 hero。register 派单时同步尝试预热卡片（cardkit POST 从 worker 关键路径挪到 dispatch 侧，issue #15 首帧 10s → 1-2s），3s 硬超时静默吞错。subject 缺省时回退到 `intent.resolveAction(key)` 首句。
 
    action 含义 + 应对：
    - `dispatch` → 派 worker（步骤 5）
@@ -481,8 +481,7 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 30s 主
    reason（queue 时）：`slot_full` / `conflict:path-overlap:...` / `conflict:exclusive-tag:...` / `user_serial`。
 
 5. **dispatch 派单动作**：
-   - **lark + streaming_card 开**：register 已同步预热卡片（hero "**接到任务：<subject>**\n\n排队中..."），无需主会话再回群占位
-   - **slack / streaming_card 关**：回群占位（lark 走 `+messages-reply` text；slack 走 `slack-send.js send-text`），register 不预热
+   - **回群占位**：`preheated===true` → 跳过（卡已建好，hero "**接到任务：<subject>**\n\n排队中..."）；`preheated===false` → 发占位（lark 走 `+messages-reply` text；slack 走 `slack-send.js send-text`）。主会话不需要自己读 profile 判 lark / flag —— 看一个字段即可
    - 推 `state.json.last_processed_time = msg.create_time`
    - 调 `Agent(subagent_type:'cc-bot:worker', run_in_background:true)`，prompt 只传 4 字段（任务描述 / `项目根` / `msg_id` / `plugin_root = ${CLAUDE_PLUGIN_ROOT}`）—— 其他规范都在 worker.md。预热场景下 worker 第一次 report 是 path 3c update（卡已建好）
    - 本响应结束，接下条 NEW_MSG

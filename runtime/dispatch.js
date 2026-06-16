@@ -2,7 +2,7 @@
 // cc-bot 消息调度（slot / tags 冲突 / 同用户串行）—— SKILL.md §消息调度 代码化
 //
 // 主会话收到 NEW_MSG 决定派工 subagent 时，全部走本 CLI：
-//   register  → 评估 + 原子写 agents.json，返回 {action: 'dispatch'|'queue', reason, taskId}
+//   register  → 评估 + 原子写 agents.json，返回 {action: 'dispatch'|'queue', reason, taskId, preheated}
 //   complete  → 移除 running[taskId]，从 queue 找下一个可跑的并 promote，返回 {promoted: taskId|null}
 //   evaluate  → dry-run（不写 state），返回会发生什么
 //   ls        → 当前 running + queue dump
@@ -32,6 +32,7 @@ const fs = require('fs')
 const path = require('path')
 const { execFileSync } = require('child_process')
 const intent = require('./intent')
+const { canUseStreamingCard } = require('./streaming-card-policy')
 
 const DEFAULT_SLOTS_MAX = 3
 const QUEUE_LIMIT = 10
@@ -154,15 +155,13 @@ function evaluate({ newTask, agentsJson }) {
 // 仅 lark + streaming_card.enabled 才预热；slack / 关卡场景维持主会话"回群占位"原行为。
 // 3s 超时静默吞掉：失败时无 state 文件 → worker 首次 report 走路径 2 自建卡，等价旧行为。
 function preheatCard({ project, newTask }) {
-  if (!newTask || !newTask.msg_id) return
+  if (!newTask || !newTask.msg_id) return false
   let profile
   try {
     profile = JSON.parse(fs.readFileSync(
       path.join(project, '.cc-bot', 'profiles', 'active.json'), 'utf8'))
-  } catch { return }
-  const im = (profile && profile.im) || {}
-  if (im.type !== 'lark') return
-  if (!(im.streaming_card && im.streaming_card.enabled === true)) return
+  } catch { return false }
+  if (!canUseStreamingCard(profile).ok) return false
 
   const subject = pickSubject(newTask, profile)
   const content = `**接到任务：${subject}**\n\n排队中，启动 worker...`
@@ -175,7 +174,14 @@ function preheatCard({ project, newTask }) {
     ], { stdio: 'ignore', timeout: PREHEAT_TIMEOUT_MS, windowsHide: true })
   } catch {
     // 超时 / 失败 → 忽略；worker 首次 report 会自己建卡兜底
+    return false
   }
+  // 成功标准：state 文件存在且 mode=card（reply / fallback 都视作未预热，主会话仍需占位）
+  const stateFile = path.join(project, '.cc-bot', 'runtime', `stream-${newTask.msg_id}.json`)
+  try {
+    const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
+    return st && st.mode === 'card'
+  } catch { return false }
 }
 
 // 优先级：主会话显式 subject > intent description 首句 > 通用兜底。
@@ -241,13 +247,15 @@ function register({ project, newTask }) {
     agentsJson.running.push(enriched)
     writeAgents(project, agentsJson)
     // 派单决定后立刻预热卡片（lark + streaming_card 开 才会真建卡，其它场景 no-op）
-    preheatCard({ project, newTask })
-    return { ...decision, taskId, queuePosition: null }
+    // preheated=true 时主会话不需要再回群占位（卡已建好，hero "排队中..."）；
+    // false 时主会话照常发占位文本——这是 SKILL.md L483-485 唯一需要看的字段。
+    const preheated = !!preheatCard({ project, newTask })
+    return { ...decision, taskId, queuePosition: null, preheated }
   }
 
   // queue
   if (agentsJson.queue.length >= QUEUE_LIMIT) {
-    return { action: 'reject', reason: 'queue_full', taskId: null }
+    return { action: 'reject', reason: 'queue_full', taskId: null, preheated: false }
   }
   enriched.queued_at = new Date().toISOString()
   enriched.reason = decision.reason
@@ -257,6 +265,7 @@ function register({ project, newTask }) {
     ...decision,
     taskId,
     queuePosition: agentsJson.running.length + agentsJson.queue.length,
+    preheated: false,
   }
 }
 
@@ -362,7 +371,7 @@ function usage() {
     '  exclusive:git — git 操作',
     '',
     'Output:',
-    '  evaluate / register → {"action":"dispatch|queue|reject","reason":"...","taskId":"...","queuePosition":N|null}',
+    '  evaluate / register → {"action":"dispatch|queue|reject","reason":"...","taskId":"...","queuePosition":N|null,"preheated":bool}',
     '  complete            → {"removed":true|false,"promoted":<Task|null>,"reason":"..."}',
   ].join('\n')
 }

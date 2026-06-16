@@ -22,6 +22,7 @@ const { execSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 const redact = require('./redact')
+const { canUseStreamingCard } = require('./streaming-card-policy')
 
 const LARK_BIN = 'lark-cli'
 const DEFAULT_TIMEOUT_MS = 15 * 1000
@@ -257,7 +258,9 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
     throw new Error(`streaming-card.js: only lark supported (im.type=${im.type || 'unset'})`)
   }
   const chatId = im.chat_id
-  const enabled = im.streaming_card && im.streaming_card.enabled === true
+  // 顶层策略由 streaming-card-policy.canUseStreamingCard 统一判（im.type=lark 在上面已门槛，
+  // 这里只取 .enabled 维度，因此 ok 等价于 streaming_card.enabled）。
+  const enabled = canUseStreamingCard(profile).ok
   // v0.1.30+：判据从字符数阈值改为是否含换行。
   // worker 写多行（含 `\n`）= 想排版展示 → 卡片；单行 = 一句话答 → 文本。
   // 比 magic number 阈值更自解释；意图驱动而非长度驱动。
@@ -477,5 +480,6 @@ module.exports = {
   buildCard, summaryFor, truncate, formatElapsed, prettifyContent,
   readProfile, stateFilePath, readState, writeState,
   cmdReport,
+  canUseStreamingCard,
   ELEMENT_ID, MAX_CONTENT_CHARS,
 }

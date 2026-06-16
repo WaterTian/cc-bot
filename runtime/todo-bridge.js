@@ -25,6 +25,7 @@
 const fs = require('fs')
 const path = require('path')
 const { spawn } = require('child_process')
+const { canUseStreamingCard } = require('./streaming-card-policy')
 
 const STREAMING_CARD_CLI = path.join(__dirname, 'streaming-card.js')
 
@@ -58,9 +59,7 @@ if (!fs.existsSync(profilePath)) safeExit()
 
 const profile = readJsonSafe(profilePath)
 if (!profile) safeExit()
-const im = profile.im || {}
-if (im.type !== 'lark') safeExit()
-if (!(im.streaming_card && im.streaming_card.enabled === true)) safeExit()
+if (!canUseStreamingCard(profile).ok) safeExit()
 
 // 找 running 任务的 msg_id
 const agentsPath = path.join(ccBotDir, 'runtime', 'agents.json')
