@@ -32,3 +32,6 @@ REGRESSION-*.md
 
 # 临时文档
 docs/
+
+# 私有 dev 调研笔记（可能含竞品名引用作 dev 参考，绝不进库）
+.research/
