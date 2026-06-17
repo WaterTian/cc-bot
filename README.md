@@ -113,13 +113,18 @@ Inside Claude Code **in your target project**, run these in order:
 
 ## Updating
 
-**v0.1.40+ 一键升级**（推荐流程，2 步）：
+**v0.1.40+ 升级流程**（推荐，逐条执行）：
 
 ```
-/cc-bot:stop                                                                           # if bot running
-/plugin marketplace update cc-bot && /plugin update cc-bot@cc-bot && /reload-plugins   # 3 行可一次粘
-/cc-bot:start                                                                          # 内含 self-heal：自动 profile schema backfill + Bash 权限补齐，老用户/老 profile 无感升级
+/cc-bot:stop                          # 若 bot 在跑
+/plugin marketplace update cc-bot     # 刷新 marketplace 清单（CC 会打开面板，看到新版关闭即可）
+/plugin update cc-bot@cc-bot          # 把新版下载到 cache（同样可能打开面板）
+/reload-plugins                       # 热加载新版到当前会话
+/cc-bot:start                         # 内含 self-heal：profile schema backfill + Bash 权限补齐，老用户无感升级
 ```
+
+> [!IMPORTANT]
+> CC 的 `/plugin ...` 是**交互式命令**（会打开 Plugin Marketplace 面板），**不支持 shell `&&` 串联**，必须逐条等执行完再下一条。想真正 1 步省心 → 用下面 `> [!TIP]` 块里的 **autoUpdate** opt-in。
 
 `/cc-bot:start` 启动前会自动跑 profile-migrate.js apply（v0.1.29+）+ Bash 权限完备度补齐（v0.1.38+ 同 setup §9 逻辑），都是**幂等纯加法**：无字段缺 / 无权限缺 = 静默；有补 = `ℹ self-heal: 补全 N 个字段 + M 条权限` 报告后正常启动。失败不阻塞 start。
 
@@ -141,7 +146,10 @@ Inside Claude Code **in your target project**, run these in order:
 > }
 > ```
 >
-> 配上 `/cc-bot:start` 的 self-heal，**完整升级流程降到 1 步**：`/exit && claude` 触发 autoUpdate → 进会话直接 `/cc-bot:start`。
+> 配上 `/cc-bot:start` 的 self-heal，**完整升级流程降到 2 步且无交互面板**：
+>
+> 1. `/exit` 退出 CC，shell 里 `claude` 重启 → CC 启动时 autoUpdate 自动拉最新版
+> 2. 进新会话 `/cc-bot:start` → self-heal + 启动
 >
 > 后悔了想关 / 没装时想开 → 手工把 `autoUpdate` 改 `true`/`false` 即可，无需重跑 setup。
 
