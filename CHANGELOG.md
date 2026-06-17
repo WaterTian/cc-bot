@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.40] - 2026-06-17
+
+- feat: /cc-bot:start §0 Pre-flight self-heal — 升级 7 步降到 2 步
+
 ## [0.1.39] - 2026-06-17
 
 - refactor: polling interval 默认 30s → 10s（3× 消息响应速度）
