@@ -187,7 +187,7 @@ Setup prints a version banner on start (`cc-bot v<X.Y.Z> setup — <project>`) t
 4. **Auto-detect IDs** — lark: `bot_app_id` / `admin_open_id` from `lark-cli auth list` / slack: `bot_user_id` from `auth.test`, zero manual entry
 5. **Write config** — `.cc-bot/profiles/active.json` (fields branch by IM type) + `state.json` + `.gitignore`; locale defaults to `zh-CN` for lark, `en-US` for slack (override via `im.locale`)
 6. **Register statusline shim** — tees stdin JSON to `hud-stdin.json` (for bot's HUD intent) + cc-hud rendering (if installed)
-7. **Register Monitor permission** — append a wildcard rule to `<project>/.claude/settings.local.json`, so cc-bot version upgrades never re-prompt for Monitor launch permission
+7. **Register Bash permission set** — append IM-specific wildcards to `<project>/.claude/settings.local.json` (runtime/*.js · lark-cli · npm install · curl GitHub) so cc-bot's setup / doctor / runtime never trigger repeated permission prompts. **Idempotent and strictly additive** — never overwrites existing rules (v0.1.38+)
 
 Every step is **idempotent** — rerun `/cc-bot:setup` anytime, it skips what's already done.
 
@@ -206,7 +206,7 @@ Then **`/cc-bot:start`** — bot comes online in ≤ 5s.
 4. **自动探测 ID** — lark：`bot_app_id` / `admin_open_id` 从 `lark-cli auth list` / slack：`bot_user_id` 从 `auth.test`，都不用手填
 5. **写配置** — 生成 `.cc-bot/profiles/active.json`（字段按 IM 分流）+ `state.json` + `.gitignore`；locale 缺省 lark=zh-CN / slack=en-US，可通过 `im.locale` 覆盖
 6. **注册 statusline shim** — 落盘 stdin JSON（给 bot 用）+ 可选透传 cc-hud（渲染状态栏）
-7. **注册 Monitor 通配权限** — 向 `<project>/.claude/settings.local.json` append 通配规则，cc-bot 版本升级不再弹 Monitor 启动权限询问
+7. **注册 Bash 权限集**（v0.1.38+）— 按 IM 分流追加 `<project>/.claude/settings.local.json`：`runtime/*.js` + `lark-cli *` + `npm install -g @larksuite/cli*` / `@slack/*` + `curl api.github.com`，让 cc-bot 运行 / setup / doctor 不再被反复打断权限询问。**纯加法 + 幂等**，绝不覆盖用户已有规则
 
 然后 **`/cc-bot:start`**，bot ≤ 5s 上线。
 
@@ -242,12 +242,15 @@ Main session ── Monitor(persistent) ── node poll.js ── lark: every 3
 
 | 工具 | 用途 |
 |---|---|
-| `runtime/streaming-card.js` | Lark CardKit v2 流式卡片 driver — 单一 `report` 入口，CLI 内部按 profile + 内容形态自动选 卡片 / 文本 / 降级 reply，自动脱敏 |
+| `runtime/streaming-card.js` | Lark CardKit v2 流式卡片 driver — 单一 `report` 入口，CLI 内部按 profile + 内容形态自动选 卡片 / 文本 / 降级 reply，自动脱敏。v0.1.36+ `state.lastContentHash` sha1 dedup 跳过同 content 重复 patch |
+| `runtime/streaming-card-policy.js` | v0.1.35+ `canUseStreamingCard(profile)` 单一事实源，被 streaming-card / dispatch / todo-bridge 共用，去重 3 处 inline `im.type + enabled` 判断漂移 |
+| `runtime/atomic-write.js` | v0.1.36+ 原子写 helper（tmp + fsync + rename + cleanup）— 全 runtime 状态文件（`agents.json` / `stream-*.json` / `poll.busy-held` / profile / 等 8 处）crash-safe |
 | `runtime/permission.js` | 角色判定 + intent level 映射（`public` / `admin` / `admin-confirm` / `group-rejected`），含高危名字防御启发式 |
 | `runtime/intent.js` | intent 解析：占位符替换（`<project.root>` / `<paths.bot_temp_abs>` 等）+ 动态可用清单（doc_progress 文件存在校验）|
 | `runtime/redact.js` | 文本脱敏（slack token / Bearer / JWT / `app_secret=*` / 飞书 cli_/ou_/om_ ID / 邮箱 / 手机号 / blocklist 真名）—— lark + slack 发群入口强制调 |
+| `runtime/slack-send.js` | v0.1.12+ Slack Web API 跨平台 helper，规避 Win curl GBK 乱码 + token 暴露；自动 redact |
 | `runtime/ack-detect.js` | 短消息 ACK 语义判定（yes / continue / ok / thanks + 停止词否决）+ 推荐回复 |
-| `runtime/dispatch.js` | agents.json 调度生命周期（evaluate / register / complete）— tags 冲突 + slot + 同 user 串行全代码化。v0.1.33+ register 同步预热流式卡片（首帧 6-10s → 1-2s，issue #15），complete 兜底 finalize 防孤儿 "● 处理中" 卡 |
+| `runtime/dispatch.js` | agents.json 调度生命周期（evaluate / register / complete / **sweep**）— tags 冲突 + slot + 同 user 串行全代码化。v0.1.33+ register 同步预热流式卡片（首帧 6-10s → 1-2s）；v0.1.35+ register 响应带 `preheated:bool` 让 SKILL.md 一行判要不要回群占位；v0.1.37+ `sweep` 子命令按 `profile.dispatch.max_turn_time_mins`（默认 0=不启用）回收超时 running + 释放 slot + agents.json `version` 字段 CAS 防 lost update |
 | `runtime/profile-migrate.js` | 版本化 profile schema migration — 升级时自动 backfill 历史新增字段，不覆盖用户已设值 |
 | `runtime/todo-bridge.js` | v0.1.32+ CC `PreToolUse` hook bridge — 主会话调 TodoWrite / TaskCreate / TaskUpdate 时自动 diff todos 变化 → spawn streaming-card.js 把进度（▸ 进行中 / ✓ 完成）推到当前 running 任务的卡片，**worker 端零负担**（hook 异步 detached 不阻塞主会话）|
 
