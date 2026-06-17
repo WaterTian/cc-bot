@@ -71,6 +71,11 @@
     "_comment": "v0.1.23+ 可选：声明 intent key 的权限级别（'public' | 'admin' | 'admin-confirm' | 'group-rejected'）。未列入的项目 intent 默认 'public'。内置 intent（hud / help / query_progress / query_todo / visual_bug_report / bot_switch）已在代码内置，profile 这里只管 profile.intents 里的项目 intent。示例：deploy admin、drop_db admin-confirm"
   },
 
+  "dispatch": {
+    "_comment": "v0.1.37+ 任务调度行为开关。max_turn_time_mins 是单 worker 任务的 wall-clock 上限（分钟），超时由 poll.js 每 tick 触发 dispatch.js sweep 强制 finalize 卡片为「任务超时」+ 释放 slot 给后续任务。默认 0 = 不启用（最保守，长任务永不被打断；现状行为）；建议值：常规中型任务 30，含首次 pnpm i / 大仓 build 等长任务 60+。注意：本字段不杀 worker 进程（CLAUDE.md 禁跨项目杀 node），worker 后续写群里会触发 streaming-card path 3b 幂等无副作用。",
+    "max_turn_time_mins": 0
+  },
+
   "self_poll_interval": "3m",
   "mcp_required": [],
   "notes": ""

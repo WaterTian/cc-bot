@@ -29,6 +29,7 @@
 const fs = require('fs')
 const path = require('path')
 const { atomicWriteSync } = require('./atomic-write')
+const dispatchModule = require('./dispatch')
 
 // ========== 参数解析 ==========
 
@@ -560,6 +561,17 @@ async function tick() {
   state = guardFutureTime(state)
 
   if (state.paused) return
+
+  // v0.1.37+ 长任务 sweep — 内部按 profile.dispatch.max_turn_time_mins 决定是否真扫；
+  // 默认 0=不启用直接返回，无开销。inline 调用避开 spawn node 进程的成本，try 兜住任何异常。
+  try {
+    const sweepRes = dispatchModule.sweep({ project: PROJECT_ROOT })
+    if (sweepRes && sweepRes.swept > 0) {
+      logEvent(`BOT_WARN|poll.js|sweep|超时回收 ${sweepRes.swept} 个 worker：${(sweepRes.swept_ids || []).join(',')}${sweepRes.promoted ? `|promoted:${sweepRes.promoted}` : ''}`)
+    }
+  } catch (e) {
+    logEvent(`BOT_WARN|poll.js|sweep-error|${e.message}`)
+  }
 
   pruneBusyHeld()
   const { busy: mainBusy, degraded, lockTs } = checkMainBusy()

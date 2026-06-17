@@ -34,6 +34,7 @@ Execute checks in parallel where possible. Collect results, then print one unifi
   - `members.admin_open_ids` non-empty array — ⚠ if `[]`（ admin 权限矩阵将全部回退到 member）
 - **`intent_permissions`（v0.1.23+，可选）**：若存在，校验每个 value ∈ `{'public','admin','admin-confirm','group-rejected'}` —— ✗ 命中无效值并报告对应 key + 列出有效值集合。同时若 key 不在 `profile.intents` 也不在 `permission.js BUILTIN_LEVELS` 中 → ⚠ "声明了未知 intent `<key>` 的权限"。
 - **`privacy.blocklist`（v0.1.24+，可选）**：若 `profile.privacy.blocklist` 存在，校验是数组且每项是非空 string —— ✗ 命中非法值。校验长度 ≥ 2（短真名易误吃），< 2 报 ⚠"<name>" 太短可能误吃常用词。
+- **`dispatch.max_turn_time_mins`（v0.1.37+，可选）**：若存在，校验是非负数（默认 `0`=不启用）。`> 0` 且 `< 5` 时报 ⚠「<N> min 偏激进，首次 pnpm i / 大仓 build 可能撞墙；建议 30+」；类型非数字 / 负值 → ✗。
 - **Profile 字段 migration（v0.1.28+）**：跑 `node ${CLAUDE_PLUGIN_ROOT}/runtime/profile-migrate.js check --project <root>`，若返回 `count > 0` → ⚠ 报「profile 缺 N 个新版字段：[paths...]，建议 /cc-bot:setup 自动 backfill」。本工具不修，doctor 是只读诊断；修法由 setup 跑 apply。
 - **Schema drift（v0.1.21+，issue #11）**：扫 profile **顶级**键，对每个属于 IM 域且应在 `im.*` 下的已知字段名报 ⚠。已知名单：`busy_placeholder` / `busy_reaction` / `debug` / `locale` / `type` / `bot_app_id` / `bot_open_id` / `chat_id` / `chat_name` / `bot_user_id` / `extra` / `streaming_card`。命中即报：
   - ⚠ 「字段 `<name>` 写在 profile 顶级 — poll.js 只读 `im.<name>`，当前值不会生效。请把它搬到 `im` 块内」
@@ -67,6 +68,10 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 - **原子写残留 `.tmp-*`（v0.1.36+）**：扫 `.cc-bot/runtime/` 下 `.tmp-` 前缀文件：
   - 不存在 → ✓
   - 存在 → ⚠ 「上次 atomic write 中断残留 N 个：[<前 3 个文件名>...]，多数情况是 crash/断电的副产物，可直接 `rm .cc-bot/runtime/.tmp-*` 清理」。残留 = 进程在 rename 之前被强杀的信号，目标文件本身未被污染（仍是上次成功写入的版本），无数据丢失
+- **`agents.json` schema（v0.1.37+）**：读 `agents.json` →
+  - `version` 字段缺失 / 非数字 → ⚠ 「agents.json 缺 version 字段（v0.1.37+ CAS 用），下次 register/complete/sweep 写入时会自动补 1，无副作用」
+  - `running[]` 任一条目缺 `started_at_ms` 且 profile `dispatch.max_turn_time_mins > 0` → ⚠ 「running 任务 `<id>` 缺 started_at_ms，本任务永不被 sweep 回收（v0.1.37 之前的旧条目）；待该 worker 自然 complete 后即恢复正常」
+  - **超龄 running 警告**：profile `dispatch.max_turn_time_mins > 0` 时，扫 `running[]` 找 `now - started_at_ms > max_turn_time_mins * 60 * 1000` 的项 → ⚠ 「running 任务 `<id>` 已超时 `<X> min`（超过 max=<N>），下个 poll.js tick 会 sweep；若 bot 未跑（poll.pid 不存在）→ 任务永远卡 running 占 slot」
 
 ### 3.5. polling_mode 漂移（v0.1.20+，issue #8）
 
