@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.42] - 2026-06-17
+
+- fix: 修正 /plugin ... 命令链 — CC 是交互面板，不支持 shell &&
+
 ## [0.1.41] - 2026-06-17
 
 - feat: setup §9.5 询问 autoUpdate（default No 保守 opt-in）
