@@ -560,6 +560,56 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
    - `Bash(curl *)` — 过宽，仅按需开 api.github.com 通配
    用户需要这些时按需在对话内 yes 单独加。
 
+9.5. **autoUpdate 询问**（v0.1.41+，可选 opt-in）— 一键升级到 1 步的最后开关。**绝不强加**：
+
+   a. Read `~/.claude/settings.json`。文件缺失 → 初值 `{}`；JSON 解析失败 → 直接跳过本步并提示用户检查文件，**不阻塞 setup**。
+
+   b. 看 `extraKnownMarketplaces['cc-bot']` 是否已存在（任何值都算，包括 `autoUpdate: false`）：
+      - **已存在** → ✓ 跳过（"autoUpdate 偏好已记录，跳过询问"）—— 尊重用户既有选择，避免每次重跑 setup 反复弹问
+      - **不存在** → 走 step c 询问
+
+   c. 用 `AskUserQuestion` 卡问（**默认 No 保守**）：
+
+      ```
+      header: "autoUpdate"
+      question: "Enable autoUpdate for cc-bot · 是否开启 cc-bot 自动升级?"
+      options:
+        - label: "No · 否（手动控制升级时机，推荐）"
+          description: "保留现有 2 步升级流程：plugin 三连 + /cc-bot:start。适合想锁定版本 / 灰度测试的用户"
+        - label: "Yes · 是（升级降到 1 步：/exit && claude → /cc-bot:start）"
+          description: "CC 启动时自动拉最新 cc-bot；配合 /cc-bot:start §0 self-heal 实现真正一键升级"
+      ```
+
+   d. 按选择写入 `~/.claude/settings.json`（merge，**不覆盖其它已存在字段**）：
+
+      **Yes 路径**：
+      ```json
+      {
+        "extraKnownMarketplaces": {
+          "cc-bot": {
+            "source": { "source": "github", "repo": "WaterTian/cc-bot" },
+            "autoUpdate": true
+          }
+        }
+      }
+      ```
+      报告：`✓ autoUpdate 已开启（CC 启动时自动拉最新 cc-bot）。要关：编辑 ~/.claude/settings.json 把 extraKnownMarketplaces.cc-bot.autoUpdate 改为 false`
+
+      **No 路径**（**记录 false 而非啥都不写** — 防下次 setup 又弹问）：
+      ```json
+      {
+        "extraKnownMarketplaces": {
+          "cc-bot": {
+            "source": { "source": "github", "repo": "WaterTian/cc-bot" },
+            "autoUpdate": false
+          }
+        }
+      }
+      ```
+      报告：`✓ autoUpdate 偏好已记录关闭（手动控制升级时机）。要开：编辑 ~/.claude/settings.json 把 extraKnownMarketplaces.cc-bot.autoUpdate 改为 true`
+
+   e. Write 失败（权限不足 / 路径异常）→ 仅 stderr 打 warning + 报告 `⚠ autoUpdate 偏好未能落盘：<msg>，下次 setup 会再问`，**不阻塞**后续 step。
+
 10. **检测 cc-hud 安装状态**（决定完成提示里附加哪段 hint）：
    ```bash
    grep -q '"cc-hud@' ~/.claude/plugins/installed_plugins.json 2>/dev/null && echo installed || echo not_installed

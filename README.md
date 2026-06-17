@@ -126,7 +126,9 @@ Inside Claude Code **in your target project**, run these in order:
 完全省略了老的 `/cc-bot:setup` + `/cc-bot:doctor` 中间两步。
 
 > [!TIP]
-> **真正一键升级 — autoUpdate（可选 opt-in）**：在你的 `~/.claude/settings.json` 把 cc-bot 的 marketplace 声明带上 `"autoUpdate": true`，CC 启动时会自动拉最新版：
+> **真正一键升级 — autoUpdate（可选 opt-in）** (v0.1.41+)
+>
+> 首次运行 `/cc-bot:setup` 时 wizard 会用 `AskUserQuestion` 卡问 "Enable autoUpdate?"，**默认 No 保守**；选 Yes 自动把以下片段 merge 进 `~/.claude/settings.json`：
 >
 > ```json
 > {
@@ -140,6 +142,8 @@ Inside Claude Code **in your target project**, run these in order:
 > ```
 >
 > 配上 `/cc-bot:start` 的 self-heal，**完整升级流程降到 1 步**：`/exit && claude` 触发 autoUpdate → 进会话直接 `/cc-bot:start`。
+>
+> 后悔了想关 / 没装时想开 → 手工把 `autoUpdate` 改 `true`/`false` 即可，无需重跑 setup。
 
 ### 进阶：手工排查（旧流程，self-heal 失败时回退）
 
