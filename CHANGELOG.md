@@ -4,6 +4,12 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.41] - 2026-06-17
+
+- feat: setup §9.5 询问 autoUpdate（default No 保守 opt-in）
+- docs: Why CC-BOT 排版优化 — 去 table cell + 中文段用全角破折号
+- docs: README 精简（392→362）+ Star History 支持 dark mode
+
 ## [0.1.40] - 2026-06-17
 
 - feat: /cc-bot:start §0 Pre-flight self-heal — 升级 7 步降到 2 步
