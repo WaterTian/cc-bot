@@ -37,7 +37,7 @@ cc-bot/
 │   └── worker.md                # cc-bot:worker — 消息调度派单的群任务执行 agent（v0.1.13+，固化发群/回报/脱敏/local-first/证据驱动）
 ├── commands/                    # slash 命令（由 plugin.json 注册）
 │   ├── setup.md                 # /cc-bot:setup（v0.1.12+ Stage 0 选 IM 后按 lark / slack 分流）
-│   ├── start.md / stop.md       # /cc-bot:start / /cc-bot:stop（按 im.type 选发送方式 + locale 双语模板）
+│   ├── start.md / stop.md       # /cc-bot:start / /cc-bot:stop（按 im.type 选发送方式 + locale 双语模板）；v0.1.40+ start.md §0 Pre-flight self-heal：profile-migrate apply + Bash 权限补齐，让升级"2 步流程"成立（/cc-bot:setup + /cc-bot:doctor 中间步可省）
 │   ├── new-profile.md           # /cc-bot:new-profile <name>
 │   ├── switch.md                # /cc-bot:switch <name>
 │   └── doctor.md                # /cc-bot:doctor（v0.1.2+ 健康检查）

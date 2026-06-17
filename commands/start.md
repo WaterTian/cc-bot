@@ -9,6 +9,22 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
 
 ### 执行
 
+**0. Pre-flight self-heal（v0.1.40+，升级一键化关键）**——把 setup §profile 字段 migration + §9 Bash 权限补齐两步集成到 start 前置，让升级流程从「`/cc-bot:setup` + `/cc-bot:doctor` + `/cc-bot:start` 三步」简化为「直接 `/cc-bot:start` 一步」。两步**幂等纯加法**，无缺则零开销静默通过。失败不阻塞 start（fall back 到老行为，靠 doctor 兜底排查）：
+
+   a. **profile schema backfill**：跑 `node ${CLAUDE_PLUGIN_ROOT}/runtime/profile-migrate.js apply --project <project.root>`：
+      - 返回 `{count: 0}` → 静默
+      - 返回 `{count: N, added: [...]}` 且 `N > 0` → 主会话报一行 `ℹ self-heal: 补全 N 个新版字段 [<前 3 个 path>...]`
+      - 命令本身失败（lark-cli 卸载等极端情况）→ 主会话报 `⚠ profile self-heal 失败：<msg>，继续启动；可手工跑 /cc-bot:setup 或 /cc-bot:doctor 排查`，**不中断 start**
+
+   b. **Bash 权限完备度补齐**（setup §9 同款逻辑）：
+      - Read `<project>/.claude/settings.local.json`（不存在用 `{}`）
+      - 按当前 `im.type` + `process.platform` 算 expected 权限集
+      - 对每条 expected：若 actual 已 exact 或 soft-covered（doctor §4a 同款家族关键词匹配 `lark-cli` / `curl+github` / `npm` 含 `@larksuite|@slack`）→ 跳过；否则 append 到 `permissions.allow[]`
+      - 写回前 diff，若 append 数 `N > 0` → 报 `ℹ self-heal: 补全 N 条 Bash 权限通配`
+      - JSON parse 失败 / write 失败 → 报 `⚠ Bash 权限 self-heal 失败：<msg>，继续启动`，**不中断 start**
+
+   c. 两步都是 quick fs ops，~100ms 内完成；若都无补 → 不报（保持 start 简洁视觉）
+
 1. **并行 Read**：
    - `.cc-bot/profiles/active.json`（拿 `im.chat_id`、`im.bot_app_id`、`project.root`、`paths.bot_temp_abs`、`polling_mode`、`self_poll_interval`）
    - `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`（拿 `version`，用于上线通知标题）

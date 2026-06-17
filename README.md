@@ -133,25 +133,43 @@ Inside Claude Code **in your target project**, run these in order:
 
 ## Updating
 
-When a new release is announced, run these in **each project** using cc-bot:
+**v0.1.40+ 一键升级**（推荐流程，2 步）：
 
 ```
-/plugin marketplace update cc-bot    # refresh manifest (detects new version)
-/plugin update cc-bot@cc-bot         # fetch new version into cache
-/reload-plugins                      # apply in current session
-/cc-bot:doctor                       # verify: first line prints "cc-bot v<new-version>"
+/cc-bot:stop                                                                           # if bot running
+/plugin marketplace update cc-bot && /plugin update cc-bot@cc-bot && /reload-plugins   # 3 行可一次粘
+/cc-bot:start                                                                          # 内含 self-heal：自动 profile schema backfill + Bash 权限补齐，老用户/老 profile 无感升级
 ```
 
-- **Before / after upgrading** — run `/cc-bot:doctor`; it flags版本漂移 / stale permissions / **profile schema missing fields**（v0.1.29+）/ **lark-cli 版本与 cardkit scope**（v0.1.29+）。
-- **If the bot is running** — `/cc-bot:stop` **before** updating, `/cc-bot:start` **after**; `/reload-plugins` does **not** update an already-running Monitor.
-- **Re-run `/cc-bot:setup` after upgrading** — idempotent (skips what's already done); refreshes anything a release introduced (Monitor permission rule, main-window hooks, IM picker, **profile schema backfill via `runtime/profile-migrate.js`** v0.1.29+). Always safe.
+`/cc-bot:start` 启动前会自动跑 profile-migrate.js apply（v0.1.29+）+ Bash 权限完备度补齐（v0.1.38+ 同 setup §9 逻辑），都是**幂等纯加法**：无字段缺 / 无权限缺 = 静默；有补 = `ℹ self-heal: 补全 N 个字段 + M 条权限` 报告后正常启动。失败不阻塞 start。
 
-> [!NOTE]
-> **Why re-running setup matters** — `/cc-bot:setup` 自动跑：① 注册 Monitor 通配权限规则避免每次升级再弹权限询问；② 注册 main-window hooks 进 `~/.claude/settings.json`；③ **`profile-migrate.js apply` backfill 历史新增字段**（如 `busy_placeholder` v0.1.19 / `busy_reaction` v0.1.21 / `streaming_card` v0.1.22 / `intent_permissions` v0.1.23 / `privacy.blocklist` v0.1.24 等），不覆盖你已设的值。
+完全省略了老的 `/cc-bot:setup` + `/cc-bot:doctor` 中间两步。
+
+> [!TIP]
+> **真正一键升级 — autoUpdate（可选 opt-in）**：在你的 `~/.claude/settings.json` 把 cc-bot 的 marketplace 声明带上 `"autoUpdate": true`，CC 启动时会自动拉最新版：
 >
-> **lark-cli scope 漂移**（v0.1.22+ 流式卡片要求 `cardkit:card:write` + `cardkit:card:read`）—— 升级 lark-cli 后必须 `lark-cli auth login --scope "cardkit:card:write cardkit:card:read"` 重新拿 token，否则 streaming card 调不动。`/cc-bot:doctor` 会显式检查这两个 scope。
+> ```json
+> {
+>   "extraKnownMarketplaces": {
+>     "cc-bot": {
+>       "source": { "source": "github", "repo": "WaterTian/cc-bot" },
+>       "autoUpdate": true
+>     }
+>   }
+> }
+> ```
 >
-> **Switching a project to Slack** (v0.1.12+) — install the SDK (`npm i -g @slack/socket-mode @slack/web-api`), then re-run `/cc-bot:setup`; the wizard starts with an IM picker. One project = one IM.
+> 配上 `/cc-bot:start` 的 self-heal，**完整升级流程降到 1 步**：`/exit && claude` 触发 autoUpdate → 进会话直接 `/cc-bot:start`。
+
+### 进阶：手工排查（旧流程，self-heal 失败时回退）
+
+```
+/cc-bot:setup     # 显式跑 profile-migrate + Bash 权限注册 + hooks 注册
+/cc-bot:doctor    # 只读健康检查 — 版本漂移 / profile / 权限完备度 / lark-cli scope / agents.json schema
+```
+
+- **lark-cli scope 漂移**（v0.1.22+ 流式卡片要求 `cardkit:card:write` + `cardkit:card:read`）—— 升级 lark-cli 后必须 `lark-cli auth login --scope "cardkit:card:write cardkit:card:read"` 重新拿 token，否则 streaming card 调不动。`/cc-bot:doctor` 会显式检查这两个 scope。
+- **Switching a project to Slack** (v0.1.12+) — install the SDK (`npm i -g @slack/socket-mode @slack/web-api`), then re-run `/cc-bot:setup`; the wizard starts with an IM picker. One project = one IM.
 
 <br/>
 
