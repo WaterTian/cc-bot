@@ -86,13 +86,25 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 
 - Read `<project-root>/.claude/settings.local.json`（不存在跳过）
 
-**4a. 必要 Bash 权限通配完备度（v0.1.38+）** — setup §9 写入的"纯加法"规则集，缺任一项主流程会反复弹权限询问。按当前 IM_TYPE + process.platform 计算期望列表：
+**4a. 必要 Bash 权限通配完备度（v0.1.38+；v0.1.39+ soft match）** — setup §9 写入的"纯加法"规则集，缺任一项主流程会反复弹权限询问。按当前 IM_TYPE + process.platform 计算期望列表：
 - 共通：runtime/*.js 当前平台通配 + `Bash(curl -sfL --max-time * https://api.github.com/repos/WaterTian/cc-bot/*)`
 - lark 额外：`Bash(lark-cli *)` + `Bash(npm install -g @larksuite/cli*)` + `Bash(npm i -g @larksuite/cli*)`
 - slack 额外：`Bash(npm install -g @slack/socket-mode*)` + `Bash(npm install -g @slack/web-api*)` + `Bash(npm i -g @slack/socket-mode*)` + `Bash(npm i -g @slack/web-api*)`
 
-- 全部存在 → ✓ Bash 权限完整（N 条）
-- 任一缺失 → ⚠ 「缺 <M>/<N> 条期望权限：[<前 3 条完整字符串>...]，建议重跑 /cc-bot:setup（step 9 幂等补齐）」
+**对每条期望规则三档分类**（避免对已手工授权了等价更窄规则的用户反复啰嗦报缺）：
+
+1. **exact match**：与 actual 字符串完全相等 → ✓
+2. **soft covered**：actual 里有功能等价的更细粒度规则。按 **expected 规则的关键词所属家族** 判定：
+   - 含 `lark-cli` 字串的 expected → actual 任一规则字符串含 `lark-cli` 即 soft covered（覆盖 `Bash(lark-cli auth *)` / `Bash(LARK_CLI_NO_PROXY=1 lark-cli *)` / `Bash(/path/to/lark-cli --version)` 等所有更窄形式）
+   - 含 `curl` 且含 `github` 的 expected → actual 任一规则字符串同时含 `curl` 和 `github` 即 soft covered（覆盖 `Bash(curl -sfL --max-time 3 https://api.github.com/repos/WaterTian/cc-bot/releases/latest)` 等具体路径）
+   - 含 `@larksuite/cli` / `@slack/socket-mode` / `@slack/web-api` 的 expected → actual 任一规则字符串含 `npm` 即 soft covered（`Bash(npm i *)` / `Bash(npm install *)` / `Bash(/opt/homebrew/bin/npm i *)` 任何形式都覆盖)
+   - 含 `cache/cc-bot/cc-bot/*/runtime/*.js` 的 expected（runtime 通配）→ **不做 soft match**（路径必须精确才有意义，跨平台前缀也要对）
+3. **hard missing**：以上两档都不沾
+
+**输出规则**：
+- 全 exact + soft covered，0 hard missing → `✓ Bash 权限完整（<E> 条 exact + <S> 条 soft-covered by 自定义规则）`
+- 仅 soft covered 有但 0 hard missing → 同上 ✓，附 ℹ 提示 "可选重跑 /cc-bot:setup 加官方通配以减少未来 doctor 噪音"
+- M 条 hard missing → ⚠ 「缺 M/N 条期望权限（含 runtime 通配类不可省）：[<前 3 条 hard missing>...]，建议重跑 /cc-bot:setup（step 9 幂等补齐）」
 - 多于期望（用户自加额外项）→ ℹ 不报警，尊重用户授权
 
 **4b. 僵尸硬编码版本路径** — 扫 `permissions.allow[]` 内含 `cache/cc-bot/cc-bot/<具体数字版本号>/` 硬编码版本号的规则。对每条命中：
