@@ -4,6 +4,11 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.36] - 2026-06-17
+
+- feat: runtime/atomic-write.js 统一原子写 + streaming-card hash dedup + doctor 加 .tmp-* 残留扫描
+- chore: gitignore .research/ for dev research notes
+
 ## [0.1.35] - 2026-06-16
 
 - refactor: 抽 streaming-card-policy.js 统一卡片策略 + register 加 preheated
