@@ -4,6 +4,12 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.39] - 2026-06-17
+
+- refactor: polling interval 默认 30s → 10s（3× 消息响应速度）
+- fix: doctor §4a Bash 权限完备度改 soft match（防误报 ⚠ 缺）
+- docs: README 同步 v0.1.35-v0.1.38 - setup §7 Bash 权限集 + Code-driven 表加 3 工具
+
 ## [0.1.38] - 2026-06-17
 
 - feat: setup §9 扩 Bash 权限集（IM 分流 + 幂等）+ doctor §4 同步检查
