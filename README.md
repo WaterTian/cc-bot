@@ -45,34 +45,20 @@
 
 <br/>
 
-## Why CC-BOT?
+## Why CC-BOT? · 为什么做 CC-BOT？
 
 <table>
 <tr><td>
 
-### The Problem
+**Problem**: Team members want to query and trigger project actions **from the group chat** — "what's the progress?" / "run tests" / "deploy staging" / "why did build fail?" — without switching to terminals, dashboards, or ticket systems. Existing chat bots need bespoke backends per project and rarely integrate with an AI coding agent.
 
-Team members want a lightweight way to ask questions and trigger project actions **from the group chat** — "what's the progress?", "run tests", "deploy staging", "why is build failing?" — without switching to terminals, dashboards, or ticket systems. Existing chat-bots require bespoke backends per project and rarely integrate with an AI coding agent.
+**Solution**: CC-BOT is a **Claude Code plugin** that listens to IM group messages, routes natural-language intents to **per-project actions** (you define them), runs them through Claude, and replies back. One plugin, any number of projects — each project's own `profile.intents` dict (intent → action description).
 
-### The Solution
+---
 
-CC-BOT is a **Claude Code plugin** that listens to IM group messages, routes natural-language intents to per-project actions (you define them), runs them through Claude, and replies back to the group. **One plugin, any number of projects** — each project has its own `profile.intents` dict mapping intent → action description, and the same Claude Code brain executes them.
+**问题**：团队希望**在群里**就能查询和触发项目操作 — 「进度怎么样？」「跑测试」「部署灰度」「构建为什么失败？」 — 而不用切到终端 / 仪表盘 / 工单系统。现有聊天机器人通常需要为每个项目定制后端，且很少与 AI 编程助手打通。
 
-</td></tr>
-</table>
-
-## 为什么做 CC-BOT？
-
-<table>
-<tr><td>
-
-### 问题
-
-团队希望**在群里**就能快速查询和触发项目操作 — 「进度怎么样？」「跑一下测试」「部署灰度」「构建为什么失败？」 — 而不用切到终端、仪表盘或工单系统。现有的聊天机器人通常需要为每个项目定制后端，并且很少与 AI 编程助手打通。
-
-### 解决方案
-
-CC-BOT 是一个 **Claude Code 插件**，监听 IM 群消息，把自然语言意图路由到项目特定操作（由你定义），通过 Claude 执行，结果回到群里。**一份插件、任意项目** — 每个项目有自己的 `profile.intents` 字典（意图 → 动作描述），同一个 Claude Code 脑子来执行。
+**方案**：CC-BOT 是 **Claude Code 插件**：监听 IM 群消息，把自然语言意图路由到**项目特定动作**（由你定义），通过 Claude 执行，结果回群。一份插件、任意项目 — 每个项目自己的 `profile.intents` 字典。
 
 </td></tr>
 </table>
@@ -194,39 +180,20 @@ Then `/cc-bot:setup`. Skips marketplace install — loads straight from the loca
 
 <br/>
 
-## Quick Start — what `/cc-bot:setup` does
+## Quick Start — what `/cc-bot:setup` does · 快速开始
 
-Setup prints a version banner on start (`cc-bot v<X.Y.Z> setup — <project>`) then runs through these steps — guided by `AskUserQuestion` cards, with IDs auto-detected wherever possible:
+Setup prints a version banner (`cc-bot v<X.Y.Z> setup — <project>`), then runs through these steps — guided by `AskUserQuestion` cards, with IDs auto-detected wherever possible:
 
-0. **Pick IM** — choose `lark` or `slack`; the wizard branches from here. A project is one-IM.
-1. **Detect tooling** — lark: auto-install `lark-cli` via `npm i -g @larksuite/cli` / slack: verify `@slack/socket-mode` + `@slack/web-api` globally installed (`npm i -g @slack/socket-mode @slack/web-api` if missing)
-2. **Authenticate** — lark: OAuth Device Flow login (app-creation checklist provided) / slack: paste `templates/slack-manifest.yaml` into App's "From a manifest" form, then paste the two tokens (`xoxb-` Bot + `xapp-` App-Level, scope `connections:write`)
-3. **Pick target chat** — lark: list bot's chats via `AskUserQuestion` card or one-click create / slack: paste channel ID `C0xxx` (the wizard probes it and reminds you to `/invite @cc-bot`)
-4. **Auto-detect IDs** — lark: `bot_app_id` / `admin_open_id` from `lark-cli auth list` / slack: `bot_user_id` from `auth.test`, zero manual entry
-5. **Write config** — `.cc-bot/profiles/active.json` (fields branch by IM type) + `state.json` + `.gitignore`; locale defaults to `zh-CN` for lark, `en-US` for slack (override via `im.locale`)
-6. **Register statusline shim** — tees stdin JSON to `hud-stdin.json` (for bot's HUD intent) + cc-hud rendering (if installed)
-7. **Register Bash permission set** — append IM-specific wildcards to `<project>/.claude/settings.local.json` (runtime/*.js · lark-cli · npm install · curl GitHub) so cc-bot's setup / doctor / runtime never trigger repeated permission prompts. **Idempotent and strictly additive** — never overwrites existing rules (v0.1.38+)
+0. **Pick IM · 选 IM** — `lark` or `slack`. One project = one IM (switching needs profile rewrite).
+1. **Detect tooling · 检测工具** — lark: auto-install `lark-cli` via `npm i -g @larksuite/cli`. slack: verify `@slack/socket-mode` + `@slack/web-api` (`npm i -g @slack/socket-mode @slack/web-api` if missing).
+2. **Authenticate · 认证** — lark: OAuth Device Flow login (with app-creation checklist). slack: paste `templates/slack-manifest.yaml` into App's "From a manifest" form, then paste `xoxb-` Bot + `xapp-` App-Level tokens (scope `connections:write`).
+3. **Pick target chat · 选目标群** — lark: list bot's chats via `AskUserQuestion` card or one-click create. slack: paste channel ID `C0xxx`; wizard probes + reminds `/invite @cc-bot`.
+4. **Auto-detect IDs · 自动探测** — lark: `bot_app_id` / `admin_open_id` from `lark-cli auth list`. slack: `bot_user_id` from `auth.test`. Zero manual entry.
+5. **Write config · 写配置** — `.cc-bot/profiles/active.json` (IM-branched fields) + `state.json` + `.gitignore`. Locale defaults: `zh-CN` (lark) / `en-US` (slack); override via `im.locale`.
+6. **Register statusline shim · 注册 shim** — tees stdin JSON to `hud-stdin.json` (for bot's HUD intent) + cc-hud rendering if installed.
+7. **Register Bash permission set · 注册 Bash 权限集** (v0.1.38+) — append IM-specific wildcards (`runtime/*.js` · `lark-cli *` · `npm install -g @larksuite/cli*` / `@slack/*` · `curl api.github.com`) to `<project>/.claude/settings.local.json`. **Strictly additive + idempotent** — never overwrites existing rules.
 
-Every step is **idempotent** — rerun `/cc-bot:setup` anytime, it skips what's already done.
-
-Then **`/cc-bot:start`** — bot comes online in ≤ 5s.
-
-<br/>
-
-## 快速开始（中文）
-
-在目标项目里运行 **`/cc-bot:setup`**，开场一行打印当前版本（`cc-bot v<X.Y.Z> setup — <project>`），然后交互式向导会：
-
-0. **选 IM** — 选 `lark` 或 `slack`，向导按 IM 分流；**一项目一 IM**（切 IM 需要重写 profile）
-1. **检测工具** — lark：未装自动 `npm i -g @larksuite/cli` / slack：校验 `@slack/socket-mode` + `@slack/web-api` 已全局装（未装提示 `npm i -g @slack/socket-mode @slack/web-api`）
-2. **认证** — lark：OAuth Device Flow 登录（附必需 scope 清单） / slack：把 `templates/slack-manifest.yaml` 粘进 App「From a manifest」表单，然后粘两个 token（`xoxb-` Bot + `xapp-` App-Level，scope `connections:write`）
-3. **选目标群** — lark：用 `AskUserQuestion` 卡片列 bot 所在群或一键新建 / slack：粘 channel id `C0xxx`，向导自动 probe + 引导 `/invite @cc-bot`
-4. **自动探测 ID** — lark：`bot_app_id` / `admin_open_id` 从 `lark-cli auth list` / slack：`bot_user_id` 从 `auth.test`，都不用手填
-5. **写配置** — 生成 `.cc-bot/profiles/active.json`（字段按 IM 分流）+ `state.json` + `.gitignore`；locale 缺省 lark=zh-CN / slack=en-US，可通过 `im.locale` 覆盖
-6. **注册 statusline shim** — 落盘 stdin JSON（给 bot 用）+ 可选透传 cc-hud（渲染状态栏）
-7. **注册 Bash 权限集**（v0.1.38+）— 按 IM 分流追加 `<project>/.claude/settings.local.json`：`runtime/*.js` + `lark-cli *` + `npm install -g @larksuite/cli*` / `@slack/*` + `curl api.github.com`，让 cc-bot 运行 / setup / doctor 不再被反复打断权限询问。**纯加法 + 幂等**，绝不覆盖用户已有规则
-
-然后 **`/cc-bot:start`**，bot ≤ 5s 上线。
+Every step is **idempotent** — rerun safely. Then **`/cc-bot:start`** — bot online in ≤ 5s.
 
 <br/>
 
@@ -379,7 +346,11 @@ worker 不需要手动调；CLI 强制脱敏，无遗漏路径。
 ## Star History
 
 <a href="https://star-history.com/#WaterTian/cc-bot&Date">
-  <img src="https://api.star-history.com/svg?repos=WaterTian/cc-bot&type=Date" alt="Star History Chart" width="700" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=WaterTian/cc-bot&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=WaterTian/cc-bot&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=WaterTian/cc-bot&type=Date" width="700" />
+  </picture>
 </a>
 
 <br/>
