@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.37] - 2026-06-17
+
+- feat: dispatch.js sweep + agents.json version CAS（长任务 wall-clock cap）
+
 ## [0.1.36] - 2026-06-17
 
 - feat: runtime/atomic-write.js 统一原子写 + streaming-card hash dedup + doctor 加 .tmp-* 残留扫描
