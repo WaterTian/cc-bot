@@ -47,21 +47,15 @@
 
 ## Why CC-BOT? · 为什么做 CC-BOT？
 
-<table>
-<tr><td>
+**Problem** — Team members want to query and trigger project actions **from the group chat** ("what's the progress?" / "run tests" / "deploy staging" / "why did build fail?") without switching to terminals, dashboards, or ticket systems. Existing chat bots need bespoke backends per project and rarely integrate with an AI coding agent.
 
-**Problem**: Team members want to query and trigger project actions **from the group chat** — "what's the progress?" / "run tests" / "deploy staging" / "why did build fail?" — without switching to terminals, dashboards, or ticket systems. Existing chat bots need bespoke backends per project and rarely integrate with an AI coding agent.
-
-**Solution**: CC-BOT is a **Claude Code plugin** that listens to IM group messages, routes natural-language intents to **per-project actions** (you define them), runs them through Claude, and replies back. One plugin, any number of projects — each project's own `profile.intents` dict (intent → action description).
+**Solution** — CC-BOT is a **Claude Code plugin** that listens to IM group messages, routes natural-language intents to **per-project actions** (you define them), runs them through Claude, and replies back. One plugin, any number of projects — each project's own `profile.intents` dict (intent → action description).
 
 ---
 
-**问题**：团队希望**在群里**就能查询和触发项目操作 — 「进度怎么样？」「跑测试」「部署灰度」「构建为什么失败？」 — 而不用切到终端 / 仪表盘 / 工单系统。现有聊天机器人通常需要为每个项目定制后端，且很少与 AI 编程助手打通。
+**问题** —— 团队希望**在群里**就能查询和触发项目操作（「进度怎么样？」「跑测试」「部署灰度」「构建为什么失败？」），而不用切到终端 / 仪表盘 / 工单系统。现有聊天机器人通常需要为每个项目定制后端，且很少与 AI 编程助手打通。
 
-**方案**：CC-BOT 是 **Claude Code 插件**：监听 IM 群消息，把自然语言意图路由到**项目特定动作**（由你定义），通过 Claude 执行，结果回群。一份插件、任意项目 — 每个项目自己的 `profile.intents` 字典。
-
-</td></tr>
-</table>
+**方案** —— CC-BOT 是 **Claude Code 插件**：监听 IM 群消息，把自然语言意图路由到**项目特定动作**（由你定义），通过 Claude 执行，结果回到群里。一份插件、任意项目 —— 每个项目自己的 `profile.intents` 字典（意图 → 动作描述）。
 
 > [!TIP]
 > **Windows users:** Use `npm i -g @anthropic-ai/claude-code` instead of the native installer to avoid Bun memory crashes ([oven-sh/bun#25082](https://github.com/oven-sh/bun/issues/25082)). cc-bot's Monitor runs long-lived, amplifying Bun's memory pressure.
