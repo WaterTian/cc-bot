@@ -82,17 +82,26 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 - `expected_mode === profile.polling_mode` → ✓
 - 不一致 → ⚠ 「profile = <profile.polling_mode>，env 探测建议 <expected_mode>。bot 会用 profile 的回路（self-poll 平均 1.5min 延迟 vs Monitor 即时 push），可能与端点不匹配。要切：编辑 .cc-bot/profiles/active.json 的 polling_mode → "<expected_mode>"，再 /cc-bot:stop + /cc-bot:start」
 
-### 4. Zombie permissions (settings.local.json)
+### 4. Bash 权限集 (settings.local.json)
 
 - Read `<project-root>/.claude/settings.local.json`（不存在跳过）
-- 扫 `permissions.allow[]` 内含 `cache/cc-bot/cc-bot/<具体数字版本号>/` 硬编码的规则
-- 对每条命中：
-  - 提取规则里嵌的版本号 vs 当前 cc-bot installed version
-  - 版本相同 → ℹ 规则匹配当前版本，仍有效（可选择升级为通配以防下次升级再弹）
-  - 版本不同 → ⚠ 僵尸规则，列出完整 rule 字符串 + 推荐替换为通配：
-    ```
-    Bash(node */cache/cc-bot/cc-bot/*/runtime/poll.js --project *)
-    ```
+
+**4a. 必要 Bash 权限通配完备度（v0.1.38+）** — setup §9 写入的"纯加法"规则集，缺任一项主流程会反复弹权限询问。按当前 IM_TYPE + process.platform 计算期望列表：
+- 共通：runtime/*.js 当前平台通配 + `Bash(curl -sfL --max-time * https://api.github.com/repos/WaterTian/cc-bot/*)`
+- lark 额外：`Bash(lark-cli *)` + `Bash(npm install -g @larksuite/cli*)` + `Bash(npm i -g @larksuite/cli*)`
+- slack 额外：`Bash(npm install -g @slack/socket-mode*)` + `Bash(npm install -g @slack/web-api*)` + `Bash(npm i -g @slack/socket-mode*)` + `Bash(npm i -g @slack/web-api*)`
+
+- 全部存在 → ✓ Bash 权限完整（N 条）
+- 任一缺失 → ⚠ 「缺 <M>/<N> 条期望权限：[<前 3 条完整字符串>...]，建议重跑 /cc-bot:setup（step 9 幂等补齐）」
+- 多于期望（用户自加额外项）→ ℹ 不报警，尊重用户授权
+
+**4b. 僵尸硬编码版本路径** — 扫 `permissions.allow[]` 内含 `cache/cc-bot/cc-bot/<具体数字版本号>/` 硬编码版本号的规则。对每条命中：
+- 提取规则里嵌的版本号 vs 当前 cc-bot installed version
+- 版本相同 → ℹ 规则匹配当前版本，仍有效（可选择升级为通配以防下次升级再弹）
+- 版本不同 → ⚠ 僵尸规则，列出完整 rule 字符串 + 推荐替换为通配：
+  ```
+  Bash(node */cache/cc-bot/cc-bot/*/runtime/poll.js --project *)
+  ```
 
 ### 5. Statusline shim (`~/.claude/settings.json`)
 

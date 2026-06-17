@@ -509,27 +509,56 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
       - 首次注册 → `✓ 已注册 todo-bridge hook 到 ~/.claude/settings.json（主会话 TodoWrite 自动同步到流式卡片）`
       - 幂等跳过 → `✓ todo-bridge hook 已就位（跳过）`
 
-9. **注册 Monitor 通配权限**到 `<project>/.claude/settings.local.json`，让 cc-bot 版本升级后不再被 CC 反复询问权限。
+9. **注册必要 Bash 权限集**到 `<project>/.claude/settings.local.json` — 让 cc-bot 正常运行 + setup/doctor 流程不被 CC 反复打断权限询问。**纯加法 + 幂等**：从不覆盖用户已有规则，重跑设置不会重复加。
 
    a. Read `<project>/.claude/settings.local.json`。文件缺失 → 初值 `{}`；解析失败 → 直接报错「settings.local.json 格式错误，请先修复」并跳过本步（不能强写覆盖用户数据）。
 
    b. 确保 `permissions.allow` 是数组（缺失则创建 `permissions: { allow: [] }`）。
 
-   c. 构造通配规则（按 `process.platform` 选模板，仅注册当前平台的模板，避免 settings.local.json 里堆冗余无效规则）。v0.1.11+ 通配范围从单一 `poll.js` 扩展到整个 `runtime/*.js`，覆盖 v0.1.11 新增的 `check-image-size.js` 等工具，未来加新工具不再需要改 setup：
-      - **Windows**（`win32`）：`Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)`
-      - **macOS**（`darwin`）：`Bash(node /Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)`
-      - **Linux**（`linux`）：`Bash(node /home/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)`
+   c. 构造**候选规则集合** RULES（按 IM_TYPE 分流，仅追加跟当前 IM 相关的；按 `process.platform` 决定 runtime 通配模板的家目录前缀，避免在 settings.local.json 堆冗余无效规则）：
 
-   d. 扫 `permissions.allow[]`：
-      - 若**已有完全相同**的通配规则（`runtime/*.js *`）→ ✓ 幂等跳过
-      - 若有 v0.1.3-v0.1.10 老 `runtime/poll.js --project *` 单文件通配规则 → **不自动删**（向下兼容、保留授权历史），但提示"检测到旧 poll.js 单文件通配规则，建议补一条 runtime/*.js 通配（v0.1.11+ 新增 check-image-size.js 等工具会被覆盖）"，并 append 新通配
-      - 若有包含 `cache/cc-bot/cc-bot/<具体数字版本号>/runtime/poll.js` 的硬编码规则 → **不自动删**（尊重用户手工授权历史；提示"检测到 X 条硬编码版本路径，建议换为通配"即可。自动清理交给 `/cc-bot:doctor --fix` 未来实现）
-      - 否则 → append 通配规则到数组末尾，Write 回去
+      **共通**（lark + slack 都加，3 条）：
+      - **runtime/*.js 通配**（v0.1.11+ 单条覆盖所有 `runtime/*.js`，未来加新工具不再改 setup）：
+        - Windows (`win32`): `Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)`
+        - macOS (`darwin`):  `Bash(node /Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)`
+        - Linux (`linux`):   `Bash(node /home/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)`
+      - **GitHub release 元抓取**（v0.1.38+ 给 doctor §1 用，免每次问 curl 权限）：
+        - `Bash(curl -sfL --max-time * https://api.github.com/repos/WaterTian/cc-bot/*)`
 
-   e. Tell user：
-      - 首次注册 → `✓ 已加通配 Monitor 权限到 .claude/settings.local.json（升级 cc-bot 版本不会再弹权限询问）`
-      - 幂等跳过 → `✓ Monitor 通配权限已就位（跳过）`
-      - 发现硬编码僵尸 → `⚠ 检测到 N 条硬编码版本路径的旧权限规则（位置 .claude/settings.local.json）。建议手工替换为通配（按当前平台模板）。`
+      **lark 路径额外**（IM_TYPE='lark' 才加，3 条）：
+      - **lark-cli 全功能通配**（覆盖 `auth login` / `auth list` / `auth check` / `im +messages-*` / `cardkit +cards-*` 等所有 setup + 主会话期间用到的子命令）：
+        - `Bash(lark-cli *)`
+      - **lark-cli 全局装/升**（setup 检测到未装时主会话会跑；@larksuite/cli 是固定包名，限定前缀避免开成 `npm i -g *` 过宽）：
+        - `Bash(npm install -g @larksuite/cli*)`
+        - `Bash(npm i -g @larksuite/cli*)`
+
+      **slack 路径额外**（IM_TYPE='slack' 才加，4 条）：
+      - **slack 依赖全局装**（Socket Mode + Web API 两个包，长/短 npm 形式都加）：
+        - `Bash(npm install -g @slack/socket-mode*)`
+        - `Bash(npm install -g @slack/web-api*)`
+        - `Bash(npm i -g @slack/socket-mode*)`
+        - `Bash(npm i -g @slack/web-api*)`
+
+   d. 对 RULES 每条规则：
+      - 扫 `permissions.allow[]` 找**字符串完全相同**的项 → 已存在，幂等跳过
+      - 否则 append 到数组末尾
+      - 同时检测老规则（不删，仅记报告）：
+        - v0.1.3-v0.1.10 老 `runtime/poll.js --project *` 单文件通配 → 提示"检测到旧 poll.js 单文件通配规则，已补 runtime/*.js 通配覆盖"
+        - 含 `cache/cc-bot/cc-bot/<具体数字版本号>/runtime/poll.js` 的硬编码版本规则 → 计数仅提示（保留用户授权历史）
+
+   e. 一次性 Write 回 `<project>/.claude/settings.local.json`。
+
+   f. Tell user：
+      - 至少有一条新加 → `✓ 已加 <N> 条 Bash 权限到 .claude/settings.local.json（runtime/*.js + lark-cli + npm install + curl GitHub 通配），后续 cc-bot 运行 / setup / doctor 不再反复弹权限询问`
+      - 全部已存在幂等 → `✓ Bash 权限集已就位（跳过 <N> 条）`
+      - 发现硬编码僵尸 → `⚠ 检测到 <N> 条硬编码版本路径的旧权限规则（.claude/settings.local.json）。建议手工替换为对应通配（详见 doctor §4 输出）。`
+
+   **故意不加的规则**（防误开危险面）：
+   - `Bash(git *)` — 含 force-push / reset --hard / branch -D 等不可逆操作
+   - `Bash(npm *)` — 过宽，可能装入任意包
+   - `Bash(rm *)` — 危险
+   - `Bash(curl *)` — 过宽，仅按需开 api.github.com 通配
+   用户需要这些时按需在对话内 yes 单独加。
 
 10. **检测 cc-hud 安装状态**（决定完成提示里附加哪段 hint）：
    ```bash
