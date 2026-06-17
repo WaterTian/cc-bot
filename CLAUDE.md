@@ -54,7 +54,7 @@ cc-bot/
 ## 架构要点
 
 - **IMAdapter 抽象**：`adapters/base.js` 定义接口（`listRecentMessages` / `sendText` / `sendImage` / `downloadResource` / `getUser`，以及 push 模式扩展的 `startListening` / `stopListening`）。已有实现：`adapters/lark.js`（polling）+ `adapters/slack.js`（push，v0.1.12+）。扩展新 IM 时新增 adapter 文件 + `runtime/poll.js` 的 factory 分支 + profile `im.type` 即可。
-- **两种工作模式**：`IM_MODE = 'polling'`（lark：HTTP 30s tick 拉 `listRecentMessages`，mainBusy 时不 emit 等下 tick 重 fetch）/ `'push'`（slack：Socket Mode WebSocket 推送，mainBusy 时**仍必须 emit**，错过永久丢失，与 polling 是根本不同原则）。详见 memory `feedback_push_mode_mainbusy`。
+- **两种工作模式**：`IM_MODE = 'polling'`（lark：HTTP 10s tick 拉 `listRecentMessages`，mainBusy 时不 emit 等下 tick 重 fetch）/ `'push'`（slack：Socket Mode WebSocket 推送，mainBusy 时**仍必须 emit**，错过永久丢失，与 polling 是根本不同原则）。详见 memory `feedback_push_mode_mainbusy`。
 - **IM 无关定位**：cc-bot 是 IM 无关的 Claude Code 群 bot 插件，目前已实现 lark + slack；见 memory `feedback_im_agnostic_design`。
 - **i18n**：`profile.im.locale` 缺省按 IM 类型决（lark=zh-CN / slack=en-US），覆盖 BUSY 占位 / 上下线通知 / HUD 行；详见 memory `feedback_im_i18n_default`。
 - **每项目独立 `.cc-bot/`**：使用 cc-bot 的项目在自己根目录下建 `.cc-bot/profiles/` + `.cc-bot/runtime/`，profile 和运行时状态都跟项目走，多项目互不污染。一项目一 IM。

@@ -215,7 +215,7 @@ Then **`/cc-bot:start`** — bot comes online in ≤ 5s.
 ## How It Works
 
 ```
-Main session ── Monitor(persistent) ── node poll.js ── lark: every 30s IMAdapter.listRecentMessages()
+Main session ── Monitor(persistent) ── node poll.js ── lark: every 10s IMAdapter.listRecentMessages()
                                                        slack: Socket Mode WebSocket push (event-driven)
                                                     ├─ dedupe via state.last_processed_time + poll.emitted
                                                     └─ stdout: NEW_MSG|msg_id|sender|text|ts
@@ -231,7 +231,7 @@ Main session ── Monitor(persistent) ── node poll.js ── lark: every 3
 
 <table>
 <tr>
-  <td align="center"><b>HTTP polling (lark)</b><br/><sub>30s fixed interval · VPN-proxy safe</sub></td>
+  <td align="center"><b>HTTP polling (lark)</b><br/><sub>10s default interval · VPN-proxy safe</sub></td>
   <td align="center"><b>Socket Mode push (slack)</b><br/><sub>WebSocket event-driven<br/>mainBusy still emits</sub></td>
   <td align="center"><b>3-layer defense</b><br/><sub>PID lockfile · EPIPE self-kill<br/>state future-value heal</sub></td>
   <td align="center"><b>Per-project isolation</b><br/><sub>.cc-bot/ per project<br/>zero cross-contamination</sub></td>

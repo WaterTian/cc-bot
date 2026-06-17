@@ -12,7 +12,7 @@
 // Profile：<project>/.cc-bot/profiles/active.json
 //   {
 //     "im": { "type": "lark", "bot_app_id": "...", "chat_id": "..." },
-//     "polling_interval_ms": 30000   // 可选
+//     "polling_interval_ms": 10000   // 可选（默认 10000 ms = 10s，v0.1.39+ 从 30s 提速到 10s）
 //   }
 //
 // 三层防御（2026-04-20 polling 架构三坑对策，不可删除）：
@@ -108,7 +108,7 @@ const DEBUG = !!(im && im.debug)  // profile.im.debug=true 时启用 BOT_DEBUG �
 // 影响范围：bot 主动发起的系统文案（busy 占位 / 上下线通知）；不影响 LLM 跟用户对话的语言
 const DEFAULT_LOCALE_BY_IM = { lark: 'zh-CN', slack: 'en-US' }
 const LOCALE = im.locale || DEFAULT_LOCALE_BY_IM[im.type] || 'zh-CN'
-const CHECK_INTERVAL_MS = Number(profile.polling_interval_ms) || 30 * 1000
+const CHECK_INTERVAL_MS = Number(profile.polling_interval_ms) || 10 * 1000
 const PAGE_SIZE = 10
 const EMITTED_MAX = 200
 const VALID_TYPES = new Set(['text', 'post', 'file', 'image'])

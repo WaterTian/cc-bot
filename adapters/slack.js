@@ -3,7 +3,7 @@
 // 依赖：@slack/web-api + @slack/socket-mode（用户安装 plugin 后由 setup 引导 npm install）。
 //
 // 与 lark adapter 的关键差异：
-//   - lark 走 polling（poll.js 30s tick 调 listRecentMessages）
+//   - lark 走 polling（poll.js 10s tick 调 listRecentMessages，v0.1.39+ 从 30s 提速到 10s）
 //   - slack 走 Socket Mode push（startListening 建 WS 长连接，消息推到回调）
 //
 // 选择 Socket Mode 而非 polling 的原因（2026-05 调研）：

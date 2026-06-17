@@ -40,10 +40,10 @@ Claude 用自然语言意图识别判定开/关，不必逐字匹配上表 — �
 
 ## 架构
 
-Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <root>`，每 30 秒通过 `IMAdapter.listRecentMessages()` 拉最近群消息（飞书 adapter 底层调 `lark-cli im +chat-messages-list` HTTP 短连接），对比 `state.last_processed_time` + `poll.emitted` 去重，emit `NEW_MSG|...` 到 stdout，Monitor 捕获为 notification 推送主会话。
+Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <root>`，每 10 秒通过 `IMAdapter.listRecentMessages()` 拉最近群消息（飞书 adapter 底层调 `lark-cli im +chat-messages-list` HTTP 短连接），对比 `state.last_processed_time` + `poll.emitted` 去重，emit `NEW_MSG|...` 到 stdout，Monitor 捕获为 notification 推送主会话。
 
 ```
-主会话 ── Monitor(persistent) ── node poll.js ── 每 30s IMAdapter.listRecentMessages() (HTTP)
+主会话 ── Monitor(persistent) ── node poll.js ── 每 10s IMAdapter.listRecentMessages() (HTTP)
                                               ├─ state.last_processed_time + poll.emitted 去重
                                               └─ stdout: NEW_MSG|msg_id|sender|content|ts
                                                          ↓ Monitor → notification
@@ -382,7 +382,7 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/ack-detect.js detect --text "<消息内容>"
 
 ### Monitor 异常时 API 兜底
 
-polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 30s 主动 HTTP 轮询拉消息 → emit NEW_MSG 到 stdout → notification 到主会话。**通常情况下 Monitor push 可靠**（不再有老架构的"Bash background stdout→pipe 压缩断开"问题）。
+polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 10s 主动 HTTP 轮询拉消息 → emit NEW_MSG 到 stdout → notification 到主会话。**通常情况下 Monitor push 可靠**（不再有老架构的"Bash background stdout→pipe 压缩断开"问题）。
 
 但以下三种场景仍需 API 兜底（直接调 `lark-cli im +chat-messages-list` 对比 `state.json.last_processed_time`，不走 poll.js / poll.emitted 通道）：
 
@@ -559,7 +559,7 @@ fan-out 任务（`subagent_count > 1`）：等**所有**子 agent 完成再调 c
 - `state.last_processed_time` 只由主会话推进；poll.js 不动它（推进纪律见 §最高优先级规则 2）
 - `poll.busy-held` 释放 emit 时若 `ct <= lastTime`，poll.js 写 `BOT_WARN|busy-held-late-release`，表示主会话可能已通过 fetch-before-reply 处理过；重复 emit 由主会话端 dedup（见 §最高优先级规则 2 "NEW_MSG 去重"）
 
-**测试 caveat**：`!` 前缀 bash 命令 UserPromptSubmit / Stop 毫秒级 fire，跨不了 poll tick（30s），会漏测。测本机制用真实 Claude prompt（≥30s 输出）。
+**测试 caveat**：`!` 前缀 bash 命令 UserPromptSubmit / Stop 毫秒级 fire，跨不了 poll tick（10s），会漏测。测本机制用真实 Claude prompt（≥10s 输出）。
 
 ## 运行时节奏（长会话反崩溃）
 
@@ -889,6 +889,6 @@ Monitor persistent task 意外退出（群消息长时间无 NEW_MSG 推送、�
    )
    ```
 4. **回写 task_id**：Monitor 返回新 task_id → Edit `state.json.monitor_task_id`
-5. **验证**：下一个 30s 周期观察 stdout 是否有 `NEW_MSG` / `BOT_INFO` / `BOT_ERROR`；仍无输出则 `/cc-bot:stop` + 人工排查 lark-cli auth 或 profile 字段
+5. **验证**：下一个 10s 周期观察 stdout 是否有 `NEW_MSG` / `BOT_INFO` / `BOT_ERROR`；仍无输出则 `/cc-bot:stop` + 人工排查 lark-cli auth 或 profile 字段
 
 **不要做的事**：不要 `kill` 所有 node 进程（会跨项目误杀）；不要删 `.cc-bot/runtime/poll.emitted`（会导致历史消息被当新消息重推）。
