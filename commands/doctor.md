@@ -64,6 +64,9 @@ Execute checks in parallel where possible. Collect results, then print one unifi
   - 存在 → 读出 entries 数量 + 最老条目年龄：
     - 全部 < 10min → ℹ N 条 held 消息中（属正常 busy 窗口残留，下一 tick 会 emit）
     - 任一 > 10min → ⚠ 陈旧 held 条目（poll.js 10min TTL 应自动清，若仍在说明 prune 没跑过；如确认无活 poll.js，建议 `rm .cc-bot/runtime/poll.busy-held`）
+- **原子写残留 `.tmp-*`（v0.1.36+）**：扫 `.cc-bot/runtime/` 下 `.tmp-` 前缀文件：
+  - 不存在 → ✓
+  - 存在 → ⚠ 「上次 atomic write 中断残留 N 个：[<前 3 个文件名>...]，多数情况是 crash/断电的副产物，可直接 `rm .cc-bot/runtime/.tmp-*` 清理」。残留 = 进程在 rename 之前被强杀的信号，目标文件本身未被污染（仍是上次成功写入的版本），无数据丢失
 
 ### 3.5. polling_mode 漂移（v0.1.20+，issue #8）
 

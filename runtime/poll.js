@@ -28,6 +28,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { atomicWriteSync } = require('./atomic-write')
 
 // ========== 参数解析 ==========
 
@@ -256,14 +257,14 @@ function acquireLock() {
       // 落盘启动失败记录：30s 窗口期撞车 / 真有合法实例并存时给 doctor + 用户可见反馈，
       // 不再静默 exit(0)。群提示不在此发——交主会话收到上方 BOT_INFO notification 后决定。
       try {
-        fs.writeFileSync(LAST_STARTUP_ERROR_FILE, JSON.stringify({
+        atomicWriteSync(LAST_STARTUP_ERROR_FILE, JSON.stringify({
           ts: Date.now(),
           iso: new Date().toISOString(),
           reason: 'lock-taken',
           pid: process.pid,
           blocked_by_pid: Number(existing),
           message: `acquireLock 失败：poll.pid 被活进程 ${existing} 持有，本进程 ${process.pid} 退出。若确认 ${existing} 是孤儿，杀掉它并删除 poll.pid 后重启`,
-        }, null, 2), 'utf8')
+        }, null, 2))
       } catch {}
       process.exit(0)
     }
@@ -325,7 +326,7 @@ function loadBusyHeld() {
 
 function persistBusyHeld() {
   try {
-    fs.writeFileSync(BUSY_HELD_FILE, JSON.stringify(Object.fromEntries(busyHeld)))
+    atomicWriteSync(BUSY_HELD_FILE, JSON.stringify(Object.fromEntries(busyHeld)))
   } catch {}
 }
 
@@ -422,7 +423,7 @@ function guardFutureTime(state) {
     const safeTime = now - 60 * 1000
     const fixed = { ...state, last_processed_time: String(safeTime) }
     try {
-      fs.writeFileSync(STATE_FILE, JSON.stringify(fixed))
+      atomicWriteSync(STATE_FILE, JSON.stringify(fixed))
     } catch {}
     console.log(`BOT_ERROR|poll.js|state-future-timestamp|last=${lastTime} > now+${FUTURE_TIME_TOLERANCE_MS}ms，已降到 ${safeTime}；可能漏历史消息`)
     return fixed

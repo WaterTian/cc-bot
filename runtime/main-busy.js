@@ -25,6 +25,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { atomicWriteSync } = require('./atomic-write')
 
 const CCB_DIR = path.join(process.cwd(), '.cc-bot')
 const CCB_RUNTIME = path.join(CCB_DIR, 'runtime')
@@ -44,12 +45,11 @@ function isCcBotProject() {
 function lock() {
   if (!isCcBotProject()) return
   try {
-    fs.mkdirSync(CCB_RUNTIME, { recursive: true })
     const payload = {
       ts: Date.now(),
       session: process.env.CLAUDE_SESSION_ID || 'unknown',
     }
-    fs.writeFileSync(LOCK_FILE, JSON.stringify(payload))
+    atomicWriteSync(LOCK_FILE, JSON.stringify(payload))
   } catch {}
 }
 

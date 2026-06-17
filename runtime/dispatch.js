@@ -33,6 +33,7 @@ const path = require('path')
 const { execFileSync } = require('child_process')
 const intent = require('./intent')
 const { canUseStreamingCard } = require('./streaming-card-policy')
+const { atomicWriteSync } = require('./atomic-write')
 
 const DEFAULT_SLOTS_MAX = 3
 const QUEUE_LIMIT = 10
@@ -109,9 +110,7 @@ function readAgents(projectRoot) {
 }
 
 function writeAgents(projectRoot, agentsJson) {
-  const f = agentsFilePath(projectRoot)
-  fs.mkdirSync(path.dirname(f), { recursive: true })
-  fs.writeFileSync(f, JSON.stringify(agentsJson, null, 2))
+  atomicWriteSync(agentsFilePath(projectRoot), JSON.stringify(agentsJson, null, 2))
 }
 
 // === 决策 ===

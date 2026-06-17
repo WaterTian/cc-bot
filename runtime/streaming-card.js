@@ -19,10 +19,12 @@
 //      sequence 自管，Feishu 9499 / cc-bot 2026-06-15 实测踩过的 settings 嵌套坑直接绕过。
 
 const { execSync } = require('child_process')
+const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const redact = require('./redact')
 const { canUseStreamingCard } = require('./streaming-card-policy')
+const { atomicWriteSync } = require('./atomic-write')
 
 const LARK_BIN = 'lark-cli'
 const DEFAULT_TIMEOUT_MS = 15 * 1000
@@ -173,8 +175,14 @@ function readState(file) {
 }
 
 function writeState(file, state) {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, JSON.stringify(state, null, 2))
+  atomicWriteSync(file, JSON.stringify(state, null, 2))
+}
+
+// v0.1.36+ content hash dedup — todo-bridge.js 主会话 TodoWrite 高频触发同 diff，
+// 重复 patch 同内容到 CardKit 浪费 quota + 客户端闪烁。state.lastContentHash 缓存
+// 上次实际发往 CardKit 的内容 sha1；report 入口 hash 等于上次直接 skip。
+function contentHash(s) {
+  return crypto.createHash('sha1').update(String(s || '')).digest('hex')
 }
 
 // === transports ===
@@ -328,6 +336,7 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
       return ok({ mode: 'fallback', reason: 'card-create-failed' })
     }
     state = { ...initState, cardId, messageId }
+    state.lastContentHash = contentHash(prettifyContent(state.content))
 
     // 首次调用就带 --final → 卡刚建立立刻 finalize。
     // state.content 已经是 initialContent（initState），不再传 content 防重复 append。
@@ -360,10 +369,18 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
     return doFinalize({ state, file, content: undefined, status, errorMsg })
   }
 
-  // 中途 update
+  // 中途 update — 先 hash dedup（同 content 重复 patch 浪费 CardKit quota + 客户端闪烁）
+  const rendered = prettifyContent(state.content) || '🧠 思考中...'
+  const h = contentHash(rendered)
+  if (state.lastContentHash === h) {
+    // 不写 state（state.content 可能因 append 变了但 rendered 同；下次差异化再写）
+    return ok({ mode: 'card', sequence: state.sequence, action: 'skipped-dedup' })
+  }
+
   state.sequence += 1
   try {
-    updateCardContent({ cardId: state.cardId, content: prettifyContent(state.content) || '🧠 思考中...', sequence: state.sequence })
+    updateCardContent({ cardId: state.cardId, content: rendered, sequence: state.sequence })
+    state.lastContentHash = h
     writeState(file, state)
     return ok({ mode: 'card', sequence: state.sequence, action: 'updated' })
   } catch (e) {

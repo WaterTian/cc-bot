@@ -17,7 +17,8 @@ cc-bot/
 ├── runtime/                    # 所有"决策 / 转换 / 状态管理"代码化的 CLI 工具（SKILL.md 调它们看返回 → 不再 prose 推理）
 │   ├── poll.js                  # 消息主进程（Monitor 托管）— 必须接 --project <abs>；IM_MODE='polling'(lark) / 'push'(slack)
 │   ├── slack-send.js            # 跨平台 Slack Web API helper（v0.1.12+ 规避 Win curl GBK 乱码 + token 暴露；v0.1.30+ 自动 redact）
-│   ├── streaming-card.js        # v0.1.22+ Feishu CardKit v2 流式卡片 driver — worker 调 `report` 统一入口，CLI 内部按 profile + 内容长度自动选 卡片 / 文本 / 降级，自动 redact 自动脱敏
+│   ├── atomic-write.js          # v0.1.36+ 原子写 helper — `.tmp-uuid + fsync + rename + cleanup`；runtime/ 全部 JSON 写点（agents.json / state.json / busy-held / profile / 等 8 处）统一走，防 crash/断电留半截
+│   ├── streaming-card.js        # v0.1.22+ Feishu CardKit v2 流式卡片 driver — worker 调 `report` 统一入口，CLI 内部按 profile + 内容长度自动选 卡片 / 文本 / 降级，自动 redact 自动脱敏；v0.1.36+ state.lastContentHash sha1 dedup 跳过同 content 重复 PUT（todo-bridge 高频同 diff 不再刷屏 + 省 CardKit quota）
 │   ├── streaming-card-policy.js # v0.1.35+ 单一事实源 — `canUseStreamingCard(profile)` 被 streaming-card / dispatch / todo-bridge 共用，去除 3 处 inline `im.type+enabled` 判断漂移
 │   ├── permission.js            # v0.1.23+ 角色 + intent level 判定（admin_open_ids 白名单 + intent_permissions 表 + 高危名字防御），SKILL §权限矩阵 代码化
 │   ├── intent.js                # v0.1.23+ intent 解析 — 占位符替换（<project.root> 等）+ 动态可用清单 + doc_progress 文件存在校验

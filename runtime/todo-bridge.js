@@ -26,6 +26,7 @@ const fs = require('fs')
 const path = require('path')
 const { spawn } = require('child_process')
 const { canUseStreamingCard } = require('./streaming-card-policy')
+const { atomicWriteSync } = require('./atomic-write')
 
 const STREAMING_CARD_CLI = path.join(__dirname, 'streaming-card.js')
 
@@ -41,8 +42,7 @@ function readJsonSafe(file) {
 
 function writeJsonSafe(file, obj) {
   try {
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, JSON.stringify(obj, null, 2))
+    atomicWriteSync(file, JSON.stringify(obj, null, 2))
   } catch {}
 }
 

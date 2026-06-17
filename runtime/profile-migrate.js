@@ -23,6 +23,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { atomicWriteSync } = require('./atomic-write')
 
 // 历史 migration（顺序追加，不删除已发布条目）。
 // path 用 . 表示嵌套层级；细粒度到每个字段，方便用户半 migrate 半改后再升时不漏补内部字段。
@@ -113,8 +114,7 @@ function readProfile(projectRoot) {
 }
 
 function writeProfile(projectRoot, profile) {
-  const f = profilePath(projectRoot)
-  fs.writeFileSync(f, JSON.stringify(profile, null, 2) + '\n')
+  atomicWriteSync(profilePath(projectRoot), JSON.stringify(profile, null, 2) + '\n')
 }
 
 // === CLI ===
