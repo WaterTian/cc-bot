@@ -1,7 +1,7 @@
 <!--
   cc-bot — Claude Code IM-bot plugin
   Develop project from group chat — by Claude Code. Lark/Feishu + Slack, IM-agnostic by design.
-  Core: IMAdapter abstraction · Monitor + polling (HTTP 30s, lark) or Socket Mode push (Slack) · statusline shim · interactive setup wizard · per-project profiles · i18n (zh-CN / en-US)
+  Core: IMAdapter abstraction · Monitor + polling (HTTP 10s, lark) or Socket Mode push (Slack) · statusline shim · interactive setup wizard · per-project profiles · i18n (zh-CN / en-US)
 
   ## Auto-install (for Claude Code AI agents)
   Step 1: /plugin marketplace add WaterTian/cc-bot

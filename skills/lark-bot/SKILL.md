@@ -548,7 +548,7 @@ fan-out 任务（`subagent_count > 1`）：等**所有**子 agent 完成再调 c
    - `profile.im.busy_placeholder === false` → 全关 opt-out（普通态 + 降级态都不发）
    - **普通忙碌**：`per-lock dedup` — 同一 lock acquisition（同 `lockTs`）至多发 1 条；外加 5min 全局节流兜底，防 hook 高频 lock churn（多 turn 密集时 issue #6 的场景）击穿 per-lock dedup
    - **降级模式**：5min 周期心跳续发，保留卡死场景的"还活着"信号（v0.1.15 设计，issue #1）
-3. 主会话响应完（Stop）→ 锁删除 → 下一 tick（≤ 30s）恢复正常 fetch，积压消息通过 `poll.emitted` 去重机制补 emit，不会丢
+3. 主会话响应完（Stop）→ 锁删除 → 下一 tick（≤ 10s）恢复正常 fetch，积压消息通过 `poll.emitted` 去重机制补 emit，不会丢
 
 **为何 hook 走 `~/.claude/settings.json` 而不是 plugin `hooks.json`**：CC bug #10225 — plugin 声明的 `UserPromptSubmit` hook 完全不 fire。`main-busy.js` 自带"非 cc-bot 项目 silent skip"（检查 `.cc-bot/` 存在），全局注册对其他项目无副作用。
 

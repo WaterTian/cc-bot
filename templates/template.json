@@ -77,6 +77,8 @@
   },
 
   "self_poll_interval": "3m",
+  "polling_interval_ms": 10000,
+  "_polling_interval_ms_comment": "Monitor 模式下 poll.js tick 间隔（ms）。10000 = 10s（默认推荐，群消息感知接近实时）。30000+ = 保守省 QPS（lark-cli +chat-messages-list 调用频次降 3x，远低于飞书 100 QPM 限速，无实际收益）。本字段不影响 slack（Socket Mode push）。",
   "mcp_required": [],
   "notes": ""
 }
