@@ -4,6 +4,12 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.43] - 2026-06-25
+
+- fix: 群消息开关意图三层防御 — 拒绝远程 stop/start (#18)
+- fix: 收尾 polling_interval_ms 默认 10s 不一致 (#19)
+- fix: poll.js degraded 分支自愈 — 心跳停更 ≥15min force-clear 锁，防主会话异常终止后群消息永久漏推 (#20)
+
 ## [0.1.42] - 2026-06-17
 
 - fix: 修正 /plugin ... 命令链 — CC 是交互面板，不支持 shell &&
