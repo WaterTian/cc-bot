@@ -9,7 +9,18 @@ Execute the **cc-bot startup flow** defined in the `lark-bot` skill (§启动流
 
 ### 执行
 
-**0. Pre-flight self-heal（v0.1.40+，升级一键化关键）**——把 setup §profile 字段 migration + §9 Bash 权限补齐两步集成到 start 前置，让升级流程从「`/cc-bot:setup` + `/cc-bot:doctor` + `/cc-bot:start` 三步」简化为「直接 `/cc-bot:start` 一步」。两步**幂等纯加法**，无缺则零开销静默通过。失败不阻塞 start（fall back 到老行为，靠 doctor 兜底排查）：
+**0a. 群消息开关闸门（issue #18，三层防御 ②）**——拒绝来自群消息的 start 触发。Bash 跑：
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/runtime/bot-switch-detect.js gate --project <project.root> --ttl-ms 60000
+```
+
+- **exit 0**（无 fresh tripwire）→ 真主会话指令，继续 step 0b
+- **exit 1**（60s 内有群消息触发开关词）→ stdout 是 JSON `{entry, reply_template_zh, reply_template_en}`。**禁止** 继续 start 流程；按 entry.msg_id 回群（`+messages-reply --message-id <entry.msg_id>`），文案按 profile.im.locale 选 `reply_template_zh` / `reply_template_en`；然后清 tripwire（`rm .cc-bot/runtime/group-bot-switch.tripwire`）；report 拒绝原因给主会话用户后停止本流程
+
+注：项目根从 active.json `project.root` 取。本闸门是代码兜底，**第一优先级**——SKILL.md §开关来源限制 是 LLM 层兜底，本步是 shell 层强制点。
+
+**0b. Pre-flight self-heal（v0.1.40+，升级一键化关键）**——把 setup §profile 字段 migration + §9 Bash 权限补齐两步集成到 start 前置，让升级流程从「`/cc-bot:setup` + `/cc-bot:doctor` + `/cc-bot:start` 三步」简化为「直接 `/cc-bot:start` 一步」。两步**幂等纯加法**，无缺则零开销静默通过。失败不阻塞 start（fall back 到老行为，靠 doctor 兜底排查）：
 
    a. **profile schema backfill**：跑 `node ${CLAUDE_PLUGIN_ROOT}/runtime/profile-migrate.js apply --project <project.root>`：
       - 返回 `{count: 0}` → 静默

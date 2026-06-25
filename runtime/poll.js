@@ -30,6 +30,7 @@ const fs = require('fs')
 const path = require('path')
 const { atomicWriteSync } = require('./atomic-write')
 const dispatchModule = require('./dispatch')
+const botSwitchDetect = require('./bot-switch-detect')
 
 // ========== 参数解析 ==========
 
@@ -484,6 +485,27 @@ function isAtOthers(mentions) {
   return !mentions.some(mt => mt && mt.id && mt.id.open_id === BOT_OPEN_ID)
 }
 
+// ========== bot_switch 群消息检测（issue #18，三层防御之一）==========
+// 命中开关词表 → 写 tripwire（commands/stop.md + start.md pre-flight gate 读它拒绝执行）+ envelope 加 FLAGS。
+// LLM 看到 FLAGS=bot_switch_from_group 应直接回拒绝模板，不调 Skill(cc-bot:stop|start)（SKILL §开关 顶部硬约束）。
+function emitNewMsg(m) {
+  let flags = ''
+  try {
+    const r = botSwitchDetect.detect(m.content)
+    if (r.matched) {
+      botSwitchDetect.writeTripwire(RUNTIME_DIR, {
+        msg_id: m.id, sender: m.senderId, content: m.content,
+        ts: Date.now(), by: r.by, keyword: r.keyword,
+      })
+      logEvent(`BOT_WARN|poll.js|bot-switch-from-group|msg=${m.id}|by=${r.by}|keyword=${r.keyword}|sender=${m.senderId}`)
+      flags = '|FLAGS=bot_switch_from_group'
+    }
+  } catch {
+    // 检测失败不阻 emit；最坏退到 layer 2/3 防御
+  }
+  console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}${flags}`)
+}
+
 // ========== 主会话优先级：锁检测 + 占位 ==========
 
 function getHeartbeatAge() {
@@ -650,7 +672,7 @@ async function tick() {
       reasons.lateRelease++
     }
 
-    console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}`)
+    emitNewMsg(m)
     newlyEmitted.push(m.id)
     reasons.emitNow++
     if (isHeld) { busyHeld.delete(m.id); busyHeldDirty = true }
@@ -686,7 +708,7 @@ async function pollOnce() {
     if (!VALID_TYPES.has(m.type)) continue
     if (!m.createTimeMs || m.createTimeMs <= lastTime) continue
     if (isAtOthers(m.mentions)) { newlyEmitted.push(m.id); continue }
-    console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}`)
+    emitNewMsg(m)
     newlyEmitted.push(m.id)
   }
   if (newlyEmitted.length > 0) appendEmitted(newlyEmitted)
@@ -728,7 +750,7 @@ async function handlePushMessage(m) {
     // push 模式必须立刻 emit — 没有"下一 tick 重新 fetch"机制，错过 push 永久丢失。
     // 主会话忙时 CC 会自动把 notification 排队，忙完按顺序处理 → 消息不丢 + 不打断主会话节奏。
     // busy 占位由 sendMainBusyPlaceholder 内部做 per-lock + 全局节流去重，不会刷屏。
-    console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}`)
+    emitNewMsg(m)
     appendEmitted([m.id])
     // reaction ack — 装饰性，与 emit/占位并列，失败不影响主链路（issue #12）
     await tryReactBusy(m)
@@ -736,7 +758,7 @@ async function handlePushMessage(m) {
     return
   }
 
-  console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}`)
+  emitNewMsg(m)
   appendEmitted([m.id])
 }
 
