@@ -540,7 +540,8 @@ fan-out 任务（`subagent_count > 1`）：等**所有**子 agent 完成再调 c
    - 锁存在 + 未过期 → **仍 fetch 但不 emit**（消息不进主会话事件队列）；按下方占位策略决定是否发占位
    - 锁存在 + 过期（> 10min）→ 查 `hud-stdin.json` 心跳：
 	     - 心跳新鲜（< 5min）→ **孤儿锁**（Stop 漏 fire 或 unlock 失败），安全清锁 + 恢复 emit；写 `events.log` `BOT_WARN|main-busy-lock-expired-orphan`
-	     - 心跳陈旧/缺失 → **降级模式**（主会话极可能卡在 `AskUserQuestion` 等阻塞交互）：锁不删、不 emit、保持 busy（`degraded=true`）；写 `events.log` `BOT_ERROR|main-busy-lock-expired-degraded`。Stop 触发后正常解锁恢复
+	     - 心跳陈旧/缺失（≥ 5min 但 < 15min）→ **降级模式**（主会话极可能卡在 `AskUserQuestion` 等阻塞交互）：锁不删、不 emit、保持 busy（`degraded=true`）；写 `events.log` `BOT_ERROR|main-busy-lock-expired-degraded`。Stop 触发后正常解锁恢复
+	     - 心跳停更 ≥ 15min（或缺失 + lock 逾期 ≥ 15min）→ **dead 自愈**（主会话进程真死，issue #20）：force-clear 锁恢复 emit；写 `events.log` `BOT_WARN|main-busy-lock-expired-dead-cleared`。AskUserQuestion 阻塞时 statusline 仍更新，不会误命中此分支
    - 锁不存在 → 正常 emit NEW_MSG
 
    **占位策略**（v0.1.19+，分层语义，issue #6 #7 一并解）：

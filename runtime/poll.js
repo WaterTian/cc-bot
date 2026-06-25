@@ -122,7 +122,9 @@ const MAIN_BUSY_TTL_MS = 10 * 60 * 1000  // 10min 硬编码过期兜底
 
 // 降级模式心跳检测（v0.1.15）：锁过期时用 hud-stdin.json 更新时间区分「孤儿锁」vs「主会话卡死」
 const HUD_STDIN_FILE = path.join(RUNTIME_DIR, 'hud-stdin.json')
-const MAIN_BUSY_HEARTBEAT_STALE_MS = 5 * 60 * 1000  // 5min — statusline 无更新视为会话卡死
+const MAIN_BUSY_HEARTBEAT_STALE_MS = 5 * 60 * 1000  // 5min — statusline 无更新视为会话卡死（进 degraded）
+// degraded 二级阈值（issue #20）：心跳停更 ≥15min → 主会话进程真死（区别于 AskUserQuestion 阻塞 — 后者 statusline 仍更新），force-clear 锁防群消息永久漏推
+const MAIN_BUSY_HEARTBEAT_DEAD_MS = 15 * 60 * 1000
 const MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS = 5 * 60 * 1000  // 5min — 降级模式占位重发间隔
 
 // busy-held 持久化（v0.1.20，issue #9）：mainBusy 期间 held 的 msg id 落盘，下一 tick 绕过 lastTime 过滤直到 emit 成功。
@@ -486,7 +488,8 @@ function isAtOthers(mentions) {
 
 function getHeartbeatAge() {
   try {
-    return Date.now() - fs.statSync(HUD_STDIN_FILE).mtimeMs
+    // 钳到 ≥0 — fs 精度可导致 mtimeMs 比 Date.now() 微大产生 0.x ms 负数，与"文件缺失"的 -1 sentinel 混淆
+    return Math.max(0, Date.now() - fs.statSync(HUD_STDIN_FILE).mtimeMs)
   } catch {
     return -1  // 文件不存在
   }
@@ -515,6 +518,16 @@ function checkMainBusy() {
       return { busy: false, degraded: false, lockTs: 0 }
     }
     // 心跳陈旧/缺失 → 主会话极可能卡死（AskUserQuestion 等阻塞交互），进入降级模式
+    // issue #20：再加一层 dead 阈值 — heartbeat 停更 ≥15min（或缺失且 lock 已逾期 ≥15min）→ 进程真死，force-clear 锁恢复 emit，防群消息永久漏推
+    const lockExpiredFor = Date.now() - ts - MAIN_BUSY_TTL_MS
+    const isDead = (heartbeatAge >= 0 && heartbeatAge >= MAIN_BUSY_HEARTBEAT_DEAD_MS) ||
+                   (heartbeatAge < 0 && lockExpiredFor >= MAIN_BUSY_HEARTBEAT_DEAD_MS)
+    if (isDead) {
+      logEvent(`BOT_WARN|poll.js|main-busy-lock-expired-dead-cleared|ttl-${MAIN_BUSY_TTL_MS}ms|heartbeat-${heartbeatAge < 0 ? `missing-lockExpiredFor-${Math.round(lockExpiredFor / 1000)}s` : Math.round(heartbeatAge / 1000) + 's'}|session=${data.session || 'unknown'}`)
+      try { fs.unlinkSync(MAIN_BUSY_LOCK) } catch {}
+      try { fs.unlinkSync(MAIN_BUSY_NOTIFIED_FLAG) } catch {}
+      return { busy: false, degraded: false, lockTs: 0 }
+    }
     logEvent(`BOT_ERROR|poll.js|main-busy-lock-expired-degraded|ttl-${MAIN_BUSY_TTL_MS}ms|heartbeat-${heartbeatAge < 0 ? 'missing' : Math.round(heartbeatAge / 1000) + 's'}|session=${data.session || 'unknown'}`)
     return { busy: true, degraded: true, lockTs: ts }
   }
