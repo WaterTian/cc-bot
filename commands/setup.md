@@ -509,7 +509,7 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
       - 首次注册 → `✓ 已注册 todo-bridge hook 到 ~/.claude/settings.json（主会话 TodoWrite 自动同步到流式卡片）`
       - 幂等跳过 → `✓ todo-bridge hook 已就位（跳过）`
 
-9. **注册必要 Bash 权限集**到 `<project>/.claude/settings.local.json` — 让 cc-bot 正常运行 + setup/doctor 流程不被 CC 反复打断权限询问。**纯加法 + 幂等**：从不覆盖用户已有规则，重跑设置不会重复加。
+9. **注册必要权限集**（Bash + 插件缓存 Read/Edit/Write）到 `<project>/.claude/settings.local.json` — 让 cc-bot 正常运行 + setup/doctor/worker 派单不被 CC 反复打断权限询问。**纯加法 + 幂等**：从不覆盖用户已有规则，重跑设置不会重复加。
 
    a. Read `<project>/.claude/settings.local.json`。文件缺失 → 初值 `{}`；解析失败 → 直接报错「settings.local.json 格式错误，请先修复」并跳过本步（不能强写覆盖用户数据）。
 
@@ -517,11 +517,15 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
 
    c. 构造**候选规则集合** RULES（按 IM_TYPE 分流，仅追加跟当前 IM 相关的；按 `process.platform` 决定 runtime 通配模板的家目录前缀，避免在 settings.local.json 堆冗余无效规则）：
 
-      **共通**（lark + slack 都加，3 条）：
-      - **runtime/*.js 通配**（v0.1.11+ 单条覆盖所有 `runtime/*.js`，未来加新工具不再改 setup）：
+      **共通**（lark + slack 都加）：
+      - **runtime/*.js Bash 通配**（v0.1.11+ 单条覆盖所有 `runtime/*.js`，未来加新工具不再改 setup）：
         - Windows (`win32`): `Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)`
         - macOS (`darwin`):  `Bash(node /Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)`
         - Linux (`linux`):   `Bash(node /home/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)`
+      - **插件缓存 Read/Edit/Write 通配**（v0.1.44+，issue #14 —— worker 派单前按 skill 指引要 `Read streaming-card.js --help` 等插件缓存文件，缺此每个新项目首次派单弹 3 次权限；`//` 是 CC gitignore 绝对路径前缀，`**` 覆盖整个 cc-bot 缓存目录含 runtime/ + skills/ + agents/。**三条 Read/Edit/Write 都加**，按 `process.platform` 选家目录前缀）：
+        - Windows (`win32`): `Read(//C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/**)` / `Edit(//C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/**)` / `Write(//C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/**)`
+        - macOS (`darwin`):  `Read(//Users/*/.claude/plugins/cache/cc-bot/cc-bot/**)` / `Edit(//Users/*/.claude/plugins/cache/cc-bot/cc-bot/**)` / `Write(//Users/*/.claude/plugins/cache/cc-bot/cc-bot/**)`
+        - Linux (`linux`):   `Read(//home/*/.claude/plugins/cache/cc-bot/cc-bot/**)` / `Edit(//home/*/.claude/plugins/cache/cc-bot/cc-bot/**)` / `Write(//home/*/.claude/plugins/cache/cc-bot/cc-bot/**)`
       - **GitHub release 元抓取**（v0.1.38+ 给 doctor §1 用，免每次问 curl 权限）：
         - `Bash(curl -sfL --max-time * https://api.github.com/repos/WaterTian/cc-bot/*)`
 
@@ -549,7 +553,7 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
    e. 一次性 Write 回 `<project>/.claude/settings.local.json`。
 
    f. Tell user：
-      - 至少有一条新加 → `✓ 已加 <N> 条 Bash 权限到 .claude/settings.local.json（runtime/*.js + lark-cli + npm install + curl GitHub 通配），后续 cc-bot 运行 / setup / doctor 不再反复弹权限询问`
+      - 至少有一条新加 → `✓ 已加 <N> 条权限到 .claude/settings.local.json（runtime/*.js Bash + 插件缓存 Read/Edit/Write + lark-cli + npm install + curl GitHub 通配），后续 cc-bot 运行 / setup / doctor / worker 派单不再反复弹权限询问`
       - 全部已存在幂等 → `✓ Bash 权限集已就位（跳过 <N> 条）`
       - 发现硬编码僵尸 → `⚠ 检测到 <N> 条硬编码版本路径的旧权限规则（.claude/settings.local.json）。建议手工替换为对应通配（详见 doctor §4 输出）。`
 

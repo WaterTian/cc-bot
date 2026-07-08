@@ -93,7 +93,7 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 - Read `<project-root>/.claude/settings.local.json`（不存在跳过）
 
 **4a. 必要 Bash 权限通配完备度（v0.1.38+；v0.1.39+ soft match）** — setup §9 写入的"纯加法"规则集，缺任一项主流程会反复弹权限询问。按当前 IM_TYPE + process.platform 计算期望列表：
-- 共通：runtime/*.js 当前平台通配 + `Bash(curl -sfL --max-time * https://api.github.com/repos/WaterTian/cc-bot/*)`
+- 共通：runtime/*.js 当前平台通配 + 插件缓存 `Read/Edit/Write(//<平台家目录前缀>/*/.claude/plugins/cache/cc-bot/cc-bot/**)` 三条（v0.1.44+，issue #14）+ `Bash(curl -sfL --max-time * https://api.github.com/repos/WaterTian/cc-bot/*)`
 - lark 额外：`Bash(lark-cli *)` + `Bash(npm install -g @larksuite/cli*)` + `Bash(npm i -g @larksuite/cli*)`
 - slack 额外：`Bash(npm install -g @slack/socket-mode*)` + `Bash(npm install -g @slack/web-api*)` + `Bash(npm i -g @slack/socket-mode*)` + `Bash(npm i -g @slack/web-api*)`
 
@@ -105,6 +105,7 @@ Execute checks in parallel where possible. Collect results, then print one unifi
    - 含 `curl` 且含 `github` 的 expected → actual 任一规则字符串同时含 `curl` 和 `github` 即 soft covered（覆盖 `Bash(curl -sfL --max-time 3 https://api.github.com/repos/WaterTian/cc-bot/releases/latest)` 等具体路径）
    - 含 `@larksuite/cli` / `@slack/socket-mode` / `@slack/web-api` 的 expected → actual 任一规则字符串含 `npm` 即 soft covered（`Bash(npm i *)` / `Bash(npm install *)` / `Bash(/opt/homebrew/bin/npm i *)` 任何形式都覆盖)
    - 含 `cache/cc-bot/cc-bot/*/runtime/*.js` 的 expected（runtime 通配）→ **不做 soft match**（路径必须精确才有意义，跨平台前缀也要对）
+   - 含 `plugins/cache/cc-bot/cc-bot/**` 的 expected（插件缓存 Read/Edit/Write 通配）→ actual 里**同 tool 前缀**（Read( / Edit( / Write( ）且路径字符串含 `cache/cc-bot/cc-bot` 即 soft covered（覆盖用户手工授权的更宽 `Read(//Users/name/.claude/**)` 或更窄 `Read(//Users/name/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/**)` 等形式；三条按 tool 各自独立判定）
 3. **hard missing**：以上两档都不沾
 
 **输出规则**：
