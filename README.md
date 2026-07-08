@@ -197,7 +197,7 @@ Setup prints a version banner (`cc-bot v<X.Y.Z> setup — <project>`), then runs
 4. **Auto-detect IDs · 自动探测** — lark: `bot_app_id` / `admin_open_id` from `lark-cli auth list`. slack: `bot_user_id` from `auth.test`. Zero manual entry.
 5. **Write config · 写配置** — `.cc-bot/profiles/active.json` (IM-branched fields) + `state.json` + `.gitignore`. Locale defaults: `zh-CN` (lark) / `en-US` (slack); override via `im.locale`.
 6. **Register statusline shim · 注册 shim** — tees stdin JSON to `hud-stdin.json` (for bot's HUD intent) + cc-hud rendering if installed.
-7. **Register Bash permission set · 注册 Bash 权限集** (v0.1.38+) — append IM-specific wildcards (`runtime/*.js` · `lark-cli *` · `npm install -g @larksuite/cli*` / `@slack/*` · `curl api.github.com`) to `<project>/.claude/settings.local.json`. **Strictly additive + idempotent** — never overwrites existing rules.
+7. **Register permission set · 注册权限集** (v0.1.38+) — append IM-specific wildcards (`runtime/*.js` · plugin-cache `Read/Edit/Write` · `lark-cli *` · `npm install -g @larksuite/cli*` / `@slack/*` · `curl api.github.com`) to `<project>/.claude/settings.local.json`. **Strictly additive + idempotent** — never overwrites existing rules.
 
 Every step is **idempotent** — rerun safely. Then **`/cc-bot:start`** — bot online in ≤ 5s.
 
