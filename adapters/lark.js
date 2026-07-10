@@ -23,8 +23,13 @@ function quoteArg(s) {
 }
 
 function parseCreateTimeMs(s) {
-  // 飞书返回 "YYYY-MM-DD HH:MM:SS"（CST）
-  const ts = Date.parse(String(s || '').replace(' ', 'T') + '+08:00')
+  // 【降级兜底路径】lark-cli `+chat-messages-list` 把 create_time 渲染成「主机本地时区」
+  // 的墙钟串（形如 "YYYY-MM-DD HH:MM"，无秒），并非固定北京时间。故不加任何固定偏移，
+  // 按主机本地时区解析 —— 与 lark-cli 渲染自洽，在任意时区主机上都得到正确绝对时刻。
+  // （曾硬编码 +08:00，非北京时区主机上会整体偏移导致 poll.js 时间游标静默丢消息，见 issue #21。）
+  // 正常路径由 _fetchCreateTimeEpochs 取飞书原始 epoch（时区无关 + 满毫秒精度）覆盖本值，
+  // 仅当 raw 端点不可用时才回落到这里。
+  const ts = Date.parse(String(s || '').replace(' ', 'T'))
   return Number.isFinite(ts) ? ts : 0
 }
 
@@ -77,6 +82,39 @@ class LarkAdapter extends IMAdapter {
     }
   }
 
+  // issue #21：`+chat-messages-list` shortcut 渲染出的 create_time 是主机本地时区墙钟串（无秒），
+  // 非北京时区主机上按固定偏移解析会整体错位 → poll.js 时间游标 `createTimeMs <= lastTime`
+  // 静默丢消息（丢在所有可观测分支之前，进程/认证/网络全正常，极难定位）。
+  //
+  // 这里走 raw OpenAPI 端点 GET /open-apis/im/v1/messages 取**未经 lark-cli 格式化**的原始
+  // create_time（Unix 毫秒串，是飞书服务器盖的绝对时刻 —— 与主机时区、主机时钟、lark-cli 版本
+  // 的渲染行为全部无关），建 message_id → epochMs 映射供 listRecentMessages 覆盖。
+  //
+  // 任何失败（端点不可用 / 解析异常 / scope 变动）静默返回空 map，调用方对 miss 的 id 回落到
+  // parseCreateTimeMs 本地解析兜底 —— 最坏退化为「本地时区自洽解析」，绝不回落到坏的固定偏移。
+  _fetchCreateTimeEpochs({ chatId, pageSize }) {
+    const map = new Map()
+    try {
+      const params = JSON.stringify({
+        container_id_type: 'chat',
+        container_id: chatId,
+        sort_type: 'ByCreateTimeDesc',
+        page_size: pageSize,
+      })
+      const out = this._run(['api', 'GET', '/open-apis/im/v1/messages', '--as', 'bot', '--params', params])
+      const json = this._parseJson(out)
+      const items = (json && json.data && json.data.items) || []
+      for (const it of items) {
+        if (!it || !it.message_id) continue
+        const ms = Number(it.create_time)
+        if (Number.isFinite(ms) && ms > 0) map.set(it.message_id, ms)
+      }
+    } catch {
+      // 静默降级：见方法头注释，调用方用 parseCreateTimeMs 兜底
+    }
+    return map
+  }
+
   async listRecentMessages({ chatId, pageSize = 10 }) {
     if (!chatId) throw new Error('listRecentMessages: chatId required')
     const out = this._run([
@@ -88,6 +126,9 @@ class LarkAdapter extends IMAdapter {
     ])
     const json = this._parseJson(out)
     const raw = (json && json.data && json.data.messages) || []
+    // 权威 epoch 覆盖：shortcut 保留其全部富化（content 渲染 / mentions / 资源），
+    // 仅时间戳改用 raw 端点的绝对 epoch（时区无关 + 满毫秒精度，见 _fetchCreateTimeEpochs）。
+    const epochMap = this._fetchCreateTimeEpochs({ chatId, pageSize })
     return raw
       .filter(m => m && m.message_id)
       .map(m => {
@@ -98,7 +139,7 @@ class LarkAdapter extends IMAdapter {
           senderType: senderId === this._botAppId ? 'bot' : 'user',
           type: m.msg_type,
           content: sanitize(m.content),
-          createTimeMs: parseCreateTimeMs(m.create_time),
+          createTimeMs: epochMap.get(m.message_id) || parseCreateTimeMs(m.create_time),
           mentions: Array.isArray(m.mentions) ? m.mentions : [],
           raw: m,
         }

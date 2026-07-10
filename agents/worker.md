@@ -19,6 +19,7 @@ effort: xhigh
 - 专注完成派给你的单个任务，不扩大范围
 - 完成后回报 ≤ 200 字，结论先行，不写内部动作流水账（不复述「先 Read X 再 Edit Y」）
 - 你**不能再派 subagent**（subagent 不能嵌套）—— 任务自己做完
+- **时间一律北京时区**：回报里涉及时间 / 日期（「14:30 完成」「预计 16:00」）一律按**北京时间（Asia/Shanghai, UTC+8）**，与主机时区无关 —— 跑 bot 的主机可能在别的时区，`date` 默认输出非北京；需当前时间用 `TZ=Asia/Shanghai date`。（消息元数据时间戳 create_time 是另一回事，由主会话按绝对 epoch 处理，worker 不碰。）
 
 ## 研究类任务 — local-first
 

@@ -337,11 +337,20 @@ LLM 职责收窄到「判语义匹配哪个 key」；占位符替换 / hint 摘�
 
 **处理完的下一个工具调用必须是 `Edit state.json` 写 `last_processed_time = {该条 time}`**，优先级高于下条处理、部署、任何"顺手再做"。漏推会导致 catch-up 时重派，同一任务跑两遍。
 
-**格式：毫秒时间戳**（Number 或数字字符串），和 `NEW_MSG|...|<createTimeMs>` 末段一致。字符串时间需先转毫秒：`node -e 'console.log(new Date("2026-04-22 17:38:00 +0800").getTime())'`。**禁止混写字符串和毫秒** — fetch 比对会假阳/假阴。
+**格式：毫秒时间戳**（Number 或数字字符串），和 `NEW_MSG|...|<createTimeMs>` 末段一致 —— **直接取 NEW_MSG 末段那个绝对 epoch**。**不要**去转 `+chat-messages-list` 显示的 `create_time` 串：那是 lark-cli 按**主机本地时区**渲染的墙钟串（无秒），按任何**固定偏移**（如 `+0800`）转毫秒都会在非京时区主机上错位 → 与 epoch 游标比对假阴、漏回消息（issue #21）。确需某条 fetch 消息的绝对 ms 时，走 raw 端点拿飞书原始 epoch（时区无关）：`lark-cli api GET /open-apis/im/v1/messages --as bot --params '{"container_id_type":"chat","container_id":"<oc_xxx>","sort_type":"ByCreateTimeDesc","page_size":5}'` → `.data.items[].create_time`（Unix 毫秒串）。**禁止混写字符串和毫秒** — fetch 比对会假阳/假阴。
+
+### 最高优先级规则 1b：系统时间戳 vs 人类语义时间（两套时区规则，别混）
+
+跑 bot 的主机**可能不在北京时区**（实测有美东主机），`date` 默认输出非北京时间。以下两类时间规则**相反**，务必分清：
+
+- **系统时间戳**（create_time / `last_processed_time` / 游标比对）：绝对 epoch 毫秒，**时区无关**，按规则 1 处理。**不给它加任何固定偏移**。
+- **人类语义时间**（用户消息**内容**里提到的钟点·日期，以及 bot **报给群里**的任何时间）：飞书群统一按**北京时间（Asia/Shanghai, UTC+8）**理解与呈现，**与主机时区无关**：
+  - 回答群里"现在几点"、报"约 16:00 完成"、写日期等群面向用途，取当前时间用 `TZ=Asia/Shanghai date`，**绝不**用主机本地时区。
+  - 把用户说的"3点""明天 14:00"换算成时间戳，按北京解释（`TZ=Asia/Shanghai date -d '...'` 或显式 `+0800`）—— 这里的 `+0800` 是**对的**，因为用户本就指北京；与规则 1「不给 create_time 加 +0800」不矛盾（那是 lark-cli 已按主机时区渲染过的串）。
 
 ### 最高优先级规则 2：处理前先 fetch 5 条核对（fetch_before_reply）
 
-收到 NEW_MSG 前先 `lark-cli im +chat-messages-list --as bot --chat-id <chat_id> --page-size 5 --sort desc`，对比 `state.last_processed_time`，未处理消息按 `create_time` 升序逐条回 + 推进 state。Why：Monitor 密集时可能只推最新一条，单 push 处理会漏中间关键消息（2026-04-20 实战）。
+收到 NEW_MSG 前先 `lark-cli im +chat-messages-list --as bot --chat-id <chat_id> --page-size 5 --sort desc`，找未处理消息（**判定用 msg_id 是否已在 bot 回复链上方，别把显示 `create_time` 串转 epoch 跟游标比时间** —— 跨时区不可靠，见规则1），按 `create_time` 显示串升序逐条回 + 推进 state（推进值仍取该条 NEW_MSG 的绝对 epoch）。Why：Monitor 密集时可能只推最新一条，单 push 处理会漏中间关键消息（2026-04-20 实战）。
 
 **一次 fetch 覆盖多条**：Monitor 连发或前次 fetch ≤ 10s 内可复用结果。
 
