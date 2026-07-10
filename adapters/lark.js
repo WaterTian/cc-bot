@@ -37,6 +37,19 @@ function sanitize(s) {
   return String(s || '').replace(/[\r\n]/g, ' ')
 }
 
+// 归一 mentions 到 `{ id: { open_id }, name, key }` —— 对齐 slack adapter + poll.js `isAtOthers`
+// 期望的形状（base.js Message 契约）。lark-cli 返回 `mentions[].id` 是**裸串** "ou_..."（issue #22），
+// 若原样透传，poll.js 判 `mt.id.open_id` 恒 undefined → 精准 @bot 检测失效、@bot 消息被当 @他人静默 skip。
+function normalizeMentions(mentions) {
+  if (!Array.isArray(mentions)) return []
+  return mentions
+    .filter(mt => mt && mt.id)
+    .map(mt => {
+      const openId = typeof mt.id === 'string' ? mt.id : (mt.id.open_id || '')
+      return { ...mt, id: { open_id: openId } }
+    })
+}
+
 class LarkAdapter extends IMAdapter {
   /**
    * @param {{botAppId: string}} opts
@@ -140,7 +153,7 @@ class LarkAdapter extends IMAdapter {
           type: m.msg_type,
           content: sanitize(m.content),
           createTimeMs: epochMap.get(m.message_id) || parseCreateTimeMs(m.create_time),
-          mentions: Array.isArray(m.mentions) ? m.mentions : [],
+          mentions: normalizeMentions(m.mentions),
           raw: m,
         }
       })

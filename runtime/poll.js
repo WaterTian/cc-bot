@@ -482,7 +482,13 @@ async function pollMessages() {
 function isAtOthers(mentions) {
   if (!Array.isArray(mentions) || mentions.length === 0) return false
   if (!BOT_OPEN_ID) return true  // 保守模式
-  return !mentions.some(mt => mt && mt.id && mt.id.open_id === BOT_OPEN_ID)
+  // 兼容两种 mention.id 形状（防 adapter 结构漂移，issue #22）：
+  // lark-cli 原始为裸串 "ou_..."；slack + lark 归一后为 {open_id}。取到谁就比谁。
+  return !mentions.some(mt => {
+    if (!mt || !mt.id) return false
+    const oid = typeof mt.id === 'string' ? mt.id : mt.id.open_id
+    return oid === BOT_OPEN_ID
+  })
 }
 
 // ========== bot_switch 群消息检测（issue #18，三层防御之一）==========

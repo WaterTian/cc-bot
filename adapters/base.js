@@ -14,6 +14,7 @@
  * @property {'text'|'post'|'file'|'image'} type 标准化的消息类型
  * @property {string} content         文本内容（post 已渲染为"文字 + [Image: xxx]"形式）
  * @property {number} createTimeMs    Unix ms 时间戳
+ * @property {Array<{id:{open_id:string}, name?:string, key?:string}>} [mentions] 归一后的 @提及列表 —— adapter 必须统一为 `id.open_id` 形（poll.js isAtOthers 据此判 @bot / @他人；issue #22）
  * @property {object} [raw]           原始数据，供 adapter 专属逻辑访问
  */
 
