@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.45] - 2026-07-10
+
+- fix: lark mentions 归一，修复精准 @bot 检测失效致 @bot 消息静默 skip (#22)
+
 ## [0.1.44] - 2026-07-10
 
 - fix: lark create_time 改用飞书原始 epoch，非京时区主机不再静默丢群消息 (#21)
