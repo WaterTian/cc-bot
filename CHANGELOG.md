@@ -4,6 +4,12 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.44] - 2026-07-10
+
+- fix: lark create_time 改用飞书原始 epoch，非京时区主机不再静默丢群消息 (#21)
+- docs: 同步插件缓存 Read/Edit/Write 通配到 start §0b self-heal + README 步骤 7
+- fix: setup 注册插件缓存 Read/Edit/Write 通配 — worker 派单免首弹 3 次权限 (#14)
+
 ## [0.1.43] - 2026-06-25
 
 - fix: 群消息开关意图三层防御 — 拒绝远程 stop/start (#18)
