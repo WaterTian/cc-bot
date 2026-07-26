@@ -88,6 +88,23 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 - `expected_mode === profile.polling_mode` → ✓
 - 不一致 → ⚠ 「profile = <profile.polling_mode>，env 探测建议 <expected_mode>。bot 会用 profile 的回路（self-poll 平均 1.5min 延迟 vs Monitor 即时 push），可能与端点不匹配。要切：编辑 .cc-bot/profiles/active.json 的 polling_mode → "<expected_mode>"，再 /cc-bot:stop + /cc-bot:start」
 
+### 3.6. 跨项目 poll.js 实例 + 配额成本（v0.1.46+，issue #23）
+
+飞书基础版配额是**租户级共享 1M 调用/月**，跨所有自建应用。polling 计费、事件订阅不计费；孤儿 poll.js（项目结束后忘了 stop）会 24h 不停烧配额，且撞满后**整租户所有 app** 都返 `99991403` / 429。本检查把「全机在跑的 poll.js」摊开可见（PID 单例锁只防同项目重复，跨项目孤儿它管不到）。
+
+- **枚举全机 poll.js**：
+  - **macOS / Linux**：`pgrep -fl 'runtime/poll\.js .*--project'`
+  - **Windows**（Git Bash）：`wmic process where "name='node.exe'" get processid,commandline 2>/dev/null | grep -i 'runtime[/\\]poll.js'`
+- 对每条提取 `--project <path>`：
+  - path === 当前项目 → ✓ 本项目实例（正常）
+  - path !== 当前项目 → ℹ 「另一项目 `<path>` 的 poll.js 在跑（pid <N>）」+ 进一步判该 path 是否仍存在：目录已删 / profile 缺失 → ⚠ 「疑似**孤儿**：项目 `<path>` 已不存在但 poll.js 仍在烧配额，建议 `kill <pid>` + 清其 `poll.pid`」
+- **配额成本行（本项目，仅 lark polling）**：读 `profile.polling_interval_ms`（缺省 60000，v0.1.46+）+ `im.type`，算空转投影：
+  - `ticksPerDay = round(86400000 / interval_ms)`；`calls/day ≈ ticksPerDay`（记忆化后空转 1 计费/tick）；`calls/month ≈ ticksPerDay × 30`
+  - ℹ 「本项目 lark polling @ `<interval_s>`s：空转≈`<calls/day>`/day ≈`<k/month>`k/month（活跃遇新消息 tick +1 raw 调用）」
+  - 若 `interval_ms < 30000` → ⚠ 「间隔 `<X>`s 偏高频（默认 60s），配额成本按比例上升；多 bot / 多 app 共租户时务必调大 `polling_interval_ms`」
+  - slack（push）→ ℹ 「push 模式事件驱动，空闲零轮询调用」
+- **多实例合计提示**：若枚举出 ≥2 个活 poll.js → ⚠ 「当前 N 个 poll.js 在跑，配额租户级共享，合计空转 ≈ Σ(each calls/day)；确认没有孤儿」
+
 ### 4. Bash 权限集 (settings.local.json)
 
 - Read `<project-root>/.claude/settings.local.json`（不存在跳过）
@@ -199,6 +216,9 @@ cc-bot doctor — <project.display_name 或 project-root basename>
 
 ## 运行时
 <Monitor / poll.pid / last-startup-error / state.last_processed_time>
+
+## poll.js 实例 / 配额（issue #23）
+<跨项目 poll.js 枚举 + 孤儿判定 + 本项目空转 calls/day·month 投影>
 
 ## 权限扫描
 <零僵尸则 ✓ "未发现硬编码旧版本路径"；否则列出僵尸条目>

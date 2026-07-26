@@ -58,6 +58,10 @@ class LarkAdapter extends IMAdapter {
     super()
     if (!botAppId) throw new Error('LarkAdapter: botAppId required')
     this._botAppId = botAppId
+    // epoch 记忆化缓存（issue #23）：message_id → 飞书原始 create_time(ms)。
+    // epoch 不可变，一旦拉到即可跨 tick 复用；仅当 shortcut 出现缓存未覆盖的新 id 时才补拉，
+    // 空转（窗口内 id 集不变）永不重复打 raw 调用 → listRecentMessages 从 2 次计费降到 1 次。
+    this._epochCache = new Map()
   }
 
   get botIdentity() {
@@ -139,9 +143,23 @@ class LarkAdapter extends IMAdapter {
     ])
     const json = this._parseJson(out)
     const raw = (json && json.data && json.data.messages) || []
+    const ids = raw.filter(m => m && m.message_id).map(m => m.message_id)
     // 权威 epoch 覆盖：shortcut 保留其全部富化（content 渲染 / mentions / 资源），
     // 仅时间戳改用 raw 端点的绝对 epoch（时区无关 + 满毫秒精度，见 _fetchCreateTimeEpochs）。
-    const epochMap = this._fetchCreateTimeEpochs({ chatId, pageSize })
+    //
+    // issue #23 记忆化：raw 是第二次计费请求，空转时纯浪费（窗口内 id 每 tick 不变）。
+    // 仅当 shortcut 返回缓存未覆盖的新 message_id 时才补拉 —— 新消息（含同分钟兄弟）一次 raw
+    // 拉回全窗口精确 epoch，精度不降；空转命中缓存 → 省掉整个第二次调用（2→1 计费/ tick）。
+    // raw 失败静默返空 → 新 id 不入缓存 → 下 tick 自动重试，其间回落 parseCreateTimeMs（同旧行为）。
+    if (ids.some(id => !this._epochCache.has(id))) {
+      const fresh = this._fetchCreateTimeEpochs({ chatId, pageSize })
+      for (const [id, ms] of fresh) this._epochCache.set(id, ms)
+      // prune 到当前窗口，界定缓存大小（epoch 不可变，丢弃出窗 id 无副作用）
+      if (this._epochCache.size > ids.length) {
+        const keep = new Set(ids)
+        for (const id of this._epochCache.keys()) if (!keep.has(id)) this._epochCache.delete(id)
+      }
+    }
     return raw
       .filter(m => m && m.message_id)
       .map(m => {
@@ -152,7 +170,7 @@ class LarkAdapter extends IMAdapter {
           senderType: senderId === this._botAppId ? 'bot' : 'user',
           type: m.msg_type,
           content: sanitize(m.content),
-          createTimeMs: epochMap.get(m.message_id) || parseCreateTimeMs(m.create_time),
+          createTimeMs: this._epochCache.get(m.message_id) || parseCreateTimeMs(m.create_time),
           mentions: normalizeMentions(m.mentions),
           raw: m,
         }

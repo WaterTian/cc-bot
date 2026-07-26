@@ -12,7 +12,7 @@
 // Profile：<project>/.cc-bot/profiles/active.json
 //   {
 //     "im": { "type": "lark", "bot_app_id": "...", "chat_id": "..." },
-//     "polling_interval_ms": 10000   // 可选（默认 10000 ms = 10s，v0.1.39+ 从 30s 提速到 10s）
+//     "polling_interval_ms": 60000   // 可选（默认 60000 ms = 60s，v0.1.46+ 从 10s 调回 60s 省租户配额，issue #23）
 //   }
 //
 // 三层防御（2026-04-20 polling 架构三坑对策，不可删除）：
@@ -109,7 +109,9 @@ const DEBUG = !!(im && im.debug)  // profile.im.debug=true 时启用 BOT_DEBUG �
 // 影响范围：bot 主动发起的系统文案（busy 占位 / 上下线通知）；不影响 LLM 跟用户对话的语言
 const DEFAULT_LOCALE_BY_IM = { lark: 'zh-CN', slack: 'en-US' }
 const LOCALE = im.locale || DEFAULT_LOCALE_BY_IM[im.type] || 'zh-CN'
-const CHECK_INTERVAL_MS = Number(profile.polling_interval_ms) || 10 * 1000
+// 默认 60s（v0.1.46+，issue #23）：飞书基础版租户级共享 1M 调用/月，10s 空转（经记忆化 1 计费/tick）
+// ≈259k/月单 bot 就吃掉 1/4 租户配额；60s 降到 ≈43k/月。profile 显式设 polling_interval_ms 覆盖此默认。
+const CHECK_INTERVAL_MS = Number(profile.polling_interval_ms) || 60 * 1000
 const PAGE_SIZE = 10
 const EMITTED_MAX = 200
 const VALID_TYPES = new Set(['text', 'post', 'file', 'image'])
@@ -803,6 +805,13 @@ if (ONCE_MODE) {
   process.on('SIGTERM', () => { releaseLock(); process.exit(0) })
   process.on('uncaughtException', () => {})
   process.on('unhandledRejection', () => {})
+  // issue #23：启动打印配额成本预测，让 polling 的租户 API 消耗前置可见。
+  // 飞书基础版租户级共享 1M 调用/月，polling 计费、事件订阅不计费。
+  // lark 空转经 epoch 记忆化后 ≈ 1 计费/tick；活跃 tick 遇新消息再 +1 raw 调用。
+  if (IM_MODE === 'polling') {
+    const ticksPerDay = Math.round((86400 * 1000) / CHECK_INTERVAL_MS)
+    console.log(`BOT_INFO|poll.js|quota-projection|${im.type} polling @ ${Math.round(CHECK_INTERVAL_MS / 1000)}s：空转≈${ticksPerDay} calls/day ≈${Math.round(ticksPerDay * 30 / 1000)}k/month（租户级共享配额；活跃遇新消息 tick +1）`)
+  }
   if (IM_MODE === 'push') setTimeout(startPushMode, 1000)
   else setTimeout(scheduleTick, 1000)
 }
