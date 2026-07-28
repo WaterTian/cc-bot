@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.47] - 2026-07-28
+
+- feat: Claude 5h 额度预警 — 快满时主动告知群里 + 耗尽期 hold 群消息
+
 ## [0.1.46] - 2026-07-26
 
 - fix: lark polling 空转配额减半 + 默认间隔 10s→60s，遏制租户 API 配额消耗 (#23)
