@@ -41,6 +41,13 @@ const MIGRATIONS = [
   { version: '0.1.24', path: 'privacy.blocklist_replace',          default: '<同事>' },
   { version: '0.1.37', path: 'dispatch',                           default: {} },
   { version: '0.1.37', path: 'dispatch.max_turn_time_mins',        default: 0 },
+  { version: '0.1.47', path: 'quota_alert',                        default: {} },
+  { version: '0.1.47', path: 'quota_alert.enabled',                default: true },
+  { version: '0.1.47', path: 'quota_alert.five_hour',              default: {} },
+  { version: '0.1.47', path: 'quota_alert.five_hour.warn_at',      default: 85 },
+  { version: '0.1.47', path: 'quota_alert.five_hour.urgent_at',    default: 95 },
+  { version: '0.1.47', path: 'quota_alert.notify_recovered',       default: true },
+  { version: '0.1.47', path: 'quota_alert.hold_messages_when_exhausted', default: true },
   // v0.1.27 曾加 im.streaming_card.short_threshold=100；v0.1.30 改为换行判据，字段不再被读取。
   // migration 移除——老 profile 留着此字段无害（代码不读），新 profile 不再 backfill。
 ]

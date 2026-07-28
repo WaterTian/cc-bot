@@ -76,6 +76,17 @@
     "max_turn_time_mins": 0
   },
 
+  "quota_alert": {
+    "_comment": "v0.1.47+ Claude 额度预警（runtime/quota-alert.js）。poll.js 每 tick 读 hud-stdin.json 的 rate_limits.five_hour，跨阈值主动发群一条 —— 群成员看不到 CC 终端，额度耗尽时只体验到「bot 突然不说话」会误判成挂了。\n— enabled（缺省 true）：设 false 全关。每个 5h 窗口最多 2-3 条，与 im.busy_placeholder 同性质默认开\n— five_hour.warn_at / urgent_at（缺省 85 / 95）：两档预警线，达 100% 自动进「耗尽」档。每档每窗口一条，只升不降（0→97% 只发 urgent 不补 warn）\n— notify_recovered（缺省 true）：上窗口发过 urgent/耗尽时，新窗口发一条「● 额度已恢复」；只发过 warn 不发\n— hold_messages_when_exhausted（缺省 true）：耗尽期群消息不 emit、暂存 poll.busy-held，恢复后补推。不开则消息被 emit 但主会话无额度处理，poll.emitted 已记而 state 没推进 = 永久丢。⚠ 仅 lark 生效：slack 是 push，不 emit 等于永久丢，故照常 emit + 话术自动换成「恢复后麻烦重发」\n去重用 resets_at 当窗口键存 quota-notified.json，窗口一滚自动清零；HUD 超 15min 未更新或 resets_at 已过期则静默跳过，不误报。",
+    "enabled": true,
+    "five_hour": {
+      "warn_at": 85,
+      "urgent_at": 95
+    },
+    "notify_recovered": true,
+    "hold_messages_when_exhausted": true
+  },
+
   "self_poll_interval": "3m",
   "polling_interval_ms": 60000,
   "_polling_interval_ms_comment": "Monitor 模式下 poll.js tick 间隔（ms）。默认 60000 = 60s（v0.1.46+ 从 10s 调回，issue #23）。⚠ 配额成本：lark polling 每 tick 至少 1 次计费 OpenAPI 调用，而飞书基础版配额是**租户级共享 1M 调用/月**（跨企业下所有自建应用），空转也 24h 不停消耗。@60s 空转≈1440 calls/day≈43k/month；@10s≈8640/day≈259k/month（单 bot 就吃 1/4 租户配额）。成本公式 calls/month≈(86400/间隔秒)×30，调大直接线性降本。要更实时可设 10000~30000（自担配额）；多 bot / 多 app 共租户时务必调大。本字段不影响 slack（Socket Mode push，事件不计配额）。切记项目结束跑 /cc-bot:stop，孤儿 poll.js 会持续烧租户配额。",

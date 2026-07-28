@@ -233,6 +233,7 @@ Context · {bar} X%
 | `.cc-bot/runtime/main-busy.lock` | 主会话忙碌锁（CC UserPromptSubmit 写 / Stop 删；poll.js 读；10min 过期自动清，详见 §主会话优先级） |
 | `.cc-bot/runtime/main-busy-notified.flag` | 群占位消息全局节流时间戳（v0.1.16+：mtimeMs = 上次发占位时刻；与 lock 生命周期解耦，unlock 不再清；详见 §主会话优先级 占位策略） |
 | `.cc-bot/runtime/poll.busy-held` | busy 期间 hold 的 msg id（v0.1.20+，issue #9 修复）：JSON `{id: {ts}}`；主窗口忙时新消息进此表不 emit，下一 tick 绕过 lastTime 过滤直到 emit 成功；10min TTL 兜底清理 |
+| `.cc-bot/runtime/quota-notified.json` | 额度预警去重表（v0.1.47+）：`{five_hour:{resets_at, sent[], pending_recovered}}`，`resets_at` 当窗口键，窗口一滚自动清零 |
 | `.cc-bot/runtime/events.log` | 诊断日志（polling 架构下常规不写；破例写入场景：poll.js 连续 3 轮 stdout 不可写退出前 `BOT_ERROR`、`main-busy.lock` 过期 10min 自动清时 `BOT_WARN`） |
 
 ## 角色与权限
@@ -604,6 +605,12 @@ fan-out 任务（`subagent_count > 1`）：等**所有**子 agent 完成再调 c
 - `poll.busy-held` 释放 emit 时若 `ct <= lastTime`，poll.js 写 `BOT_WARN|busy-held-late-release`，表示主会话可能已通过 fetch-before-reply 处理过；重复 emit 由主会话端 dedup（见 §最高优先级规则 2 "NEW_MSG 去重"）
 
 **测试 caveat**：`!` 前缀 bash 命令 UserPromptSubmit / Stop 毫秒级 fire，跨不了 poll tick（10s），会漏测。测本机制用真实 Claude prompt（≥10s 输出）。
+
+### Claude 额度预警（v0.1.47+）
+
+poll.js 每 tick 读 HUD 的 `rate_limits.five_hour`，跨 85% / 95% / 耗尽 三档各发群一条（判定 / 文案 / 去重全在 `runtime/quota-alert.js`；`resets_at` 当窗口键，每档每窗口一条，新窗口自动清零并补发「已恢复」）。耗尽期群消息走 §主会话优先级 同一条 `busy-held` hold 路径暂存，恢复后补推。
+
+**主会话做什么**：什么都不用做，全程 poll.js 自主 —— 它是独立进程不吃额度，额度耗尽时反而是唯一还能开口的组件。群里主动问额度仍走 §HUD 状态推送。关闭 / 调阈值见 `profile.quota_alert`。
 
 ## 运行时节奏（长会话反崩溃）
 

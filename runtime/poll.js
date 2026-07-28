@@ -31,6 +31,7 @@ const path = require('path')
 const { atomicWriteSync } = require('./atomic-write')
 const dispatchModule = require('./dispatch')
 const botSwitchDetect = require('./bot-switch-detect')
+const quotaAlert = require('./quota-alert')
 
 // ========== 参数解析 ==========
 
@@ -113,6 +114,11 @@ const LOCALE = im.locale || DEFAULT_LOCALE_BY_IM[im.type] || 'zh-CN'
 // ≈259k/月单 bot 就吃掉 1/4 租户配额；60s 降到 ≈43k/月。profile 显式设 polling_interval_ms 覆盖此默认。
 const CHECK_INTERVAL_MS = Number(profile.polling_interval_ms) || 60 * 1000
 const PAGE_SIZE = 10
+// hold 期间（主会话忙 / 额度耗尽）拉更多条：hold 解除后要靠这一页把积压的消息补出来，
+// 页太小时长 hold（额度耗尽可达数小时）里较早的消息会滚出拉取窗口永久丢。
+// 同样是 1 次计费调用，加页不加成本（issue #23 口径）。
+const HOLD_PAGE_SIZE = 30
+const QUOTA_CHECK_INTERVAL_MS = 60 * 1000  // push 模式没有 tick 循环，额度检查单挂定时器
 const EMITTED_MAX = 200
 const VALID_TYPES = new Set(['text', 'post', 'file', 'image'])
 const FAIL_ALERT_THRESHOLD = 4
@@ -466,9 +472,9 @@ function appendEmitted(msgIds) {
   } catch {}
 }
 
-async function pollMessages() {
+async function pollMessages(pageSize = PAGE_SIZE) {
   try {
-    const msgs = await adapter.listRecentMessages({ chatId: CHAT_ID, pageSize: PAGE_SIZE })
+    const msgs = await adapter.listRecentMessages({ chatId: CHAT_ID, pageSize })
     consecutiveFailures = 0
     alertedOnce = false
     return msgs
@@ -596,6 +602,45 @@ async function sendMainBusyPlaceholder({ degraded = false, lockTs = 0 } = {}) {
   }
 }
 
+// ========== Claude 额度预警（v0.1.47+）==========
+//
+// 判定 / 文案 / 去重全在 runtime/quota-alert.js；本函数只负责「发」+「把 hold 结论交回 tick」。
+// 返回 { hold }：true 时走 mainBusy 同款路径 hold 群消息，额度恢复后补推。
+// holdCapable=false（push 模式）时不 hold —— 详见 startPushMode 处说明。
+async function checkQuotaAndNotify({ holdCapable = true } = {}) {
+  let res
+  try {
+    // paused 时不打扰群里（tick 已提前 return，这里是给 push 模式定时器兜底）
+    if (readState().paused) return { hold: false }
+    res = quotaAlert.check({ project: PROJECT_ROOT })
+  } catch (e) {
+    logEvent(`BOT_WARN|poll.js|quota-check-error|${(e && e.message) || e}`)
+    return { hold: false }
+  }
+  if (!res || !res.ok) {
+    logDebug(`quota|skip|${(res && res.reason) || 'unknown'}`)
+    return { hold: false }
+  }
+
+  const hold = holdCapable && !!res.hold
+  if (res.shouldNotify && res.text) {
+    // 耗尽档的文案要跟真实 hold 能力一致，别承诺做不到的「我先记着」
+    const text = res.level === 'exhausted' && !hold
+      ? quotaAlert.render({ ...res, hold: false })
+      : res.text
+    try {
+      await adapter.sendText({ chatId: CHAT_ID, text })
+      // 发成功才记账；失败不记 → 下一 tick 自动重试（不会永久漏报）
+      quotaAlert.record({ project: PROJECT_ROOT, level: res.level })
+      logEvent(`BOT_INFO|poll.js|quota-alert|${res.level}|used=${Math.round(res.used)}%|resets=${res.resetsAt}`)
+    } catch (e) {
+      logEvent(`BOT_WARN|poll.js|quota-alert-send-failed|${res.level}|${(e && e.message) || e}`)
+    }
+  }
+  logDebug(`quota|used=${Math.round(res.used)}%|level=${res.level || 'none'}|hold=${hold}`)
+  return { hold }
+}
+
 async function tick() {
   if (!checkStdoutTolerance()) return
   verifyLock()
@@ -618,8 +663,11 @@ async function tick() {
 
   pruneBusyHeld()
   const { busy: mainBusy, degraded, lockTs } = checkMainBusy()
+  // 额度耗尽与主会话忙碌走同一条 hold 路径：不 emit、进 busy-held、恢复后补推
+  const { hold: quotaHold } = await checkQuotaAndNotify()
+  const holdMsgs = mainBusy || quotaHold
 
-  const msgs = await pollMessages()
+  const msgs = await pollMessages(holdMsgs ? HOLD_PAGE_SIZE : PAGE_SIZE)
   if (msgs === null) {
     if (consecutiveFailures >= FAIL_ALERT_THRESHOLD && !alertedOnce) {
       console.log(`BOT_ERROR|poll.js|adapter 连续失败 ${consecutiveFailures} 次，可能认证过期或网络故障`)
@@ -628,7 +676,7 @@ async function tick() {
     return
   }
   if (msgs.length === 0) {
-    logDebug(`tick|lastTime=${state.last_processed_time}|msgs=0|busy=${mainBusy}|held=${busyHeld.size}`)
+    logDebug(`tick|lastTime=${state.last_processed_time}|msgs=0|busy=${mainBusy}|quotaHold=${quotaHold}|held=${busyHeld.size}`)
     return
   }
 
@@ -660,8 +708,8 @@ async function tick() {
       continue
     }
 
-    if (mainBusy) {
-      // 主窗口忙：不 emit、不记 emitted；记 busy-held（持久化，下次绕过 time 过滤直到 emit 成功）
+    if (holdMsgs) {
+      // 主窗口忙 / 额度耗尽：不 emit、不记 emitted；记 busy-held（持久化，下次绕过 time 过滤直到 emit 成功）
       busySeenNew = true
       if (!isHeld) {
         busyHeld.set(m.id, { ts: Date.now() })
@@ -689,7 +737,7 @@ async function tick() {
   if (busyHeldDirty) persistBusyHeld()
   if (mainBusy && busySeenNew) await sendMainBusyPlaceholder({ degraded, lockTs })
   if (newlyEmitted.length > 0) appendEmitted(newlyEmitted)
-  logDebug(`tick|lastTime=${lastTime}|msgs=${msgs.length}|busy=${mainBusy}|held=${busyHeld.size}|reasons=${JSON.stringify(reasons)}`)
+  logDebug(`tick|lastTime=${lastTime}|msgs=${msgs.length}|busy=${mainBusy}|quotaHold=${quotaHold}|held=${busyHeld.size}|reasons=${JSON.stringify(reasons)}`)
 }
 
 // self-poll 单次模式：跑一次拉取，输出新消息到 stdout 后退出（由 /loop 每轮驱动，不依赖 Monitor）。
@@ -812,6 +860,15 @@ if (ONCE_MODE) {
     const ticksPerDay = Math.round((86400 * 1000) / CHECK_INTERVAL_MS)
     console.log(`BOT_INFO|poll.js|quota-projection|${im.type} polling @ ${Math.round(CHECK_INTERVAL_MS / 1000)}s：空转≈${ticksPerDay} calls/day ≈${Math.round(ticksPerDay * 30 / 1000)}k/month（租户级共享配额；活跃遇新消息 tick +1）`)
   }
-  if (IM_MODE === 'push') setTimeout(startPushMode, 1000)
-  else setTimeout(scheduleTick, 1000)
+  if (IM_MODE === 'push') {
+    setTimeout(startPushMode, 1000)
+    // push 模式是事件驱动、没有 tick 循环，额度检查单挂低频定时器。
+    // holdCapable=false：Socket Mode 推来的消息不 emit 就永久丢，没有「下一 tick 重 fetch」兜底，
+    // 所以耗尽期仍照常 emit（CC 会把 notification 排队），只是话术改成「恢复后麻烦重发」。
+    setInterval(() => {
+      checkQuotaAndNotify({ holdCapable: false }).catch(() => {})
+    }, QUOTA_CHECK_INTERVAL_MS)
+  } else {
+    setTimeout(scheduleTick, 1000)
+  }
 }

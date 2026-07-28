@@ -105,6 +105,17 @@ Execute checks in parallel where possible. Collect results, then print one unifi
   - slack（push）→ ℹ 「push 模式事件驱动，空闲零轮询调用」
 - **多实例合计提示**：若枚举出 ≥2 个活 poll.js → ⚠ 「当前 N 个 poll.js 在跑，配额租户级共享，合计空转 ≈ Σ(each calls/day)；确认没有孤儿」
 
+### 3.7. Claude 额度预警（v0.1.47+）
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/runtime/quota-alert.js status --project <项目根>
+```
+
+`status` 是只读的（不写 `quota-notified.json`）。按返回报：
+
+- `ok:true` → ℹ 「5h 额度 `<used>`%（阈值 `<warnAt>`/`<urgentAt>`，`<hhmm>` 重置）」；`level` 非 null 时补当前档位
+- `ok:false` → 按 `reason`：`disabled` = ℹ 已关闭；`hud-missing` / `hud-stale` = ⚠ 「HUD 无数据或超 15min 未更新，额度预警静默中」+ 指向 §5 statusline shim 检查；`window-expired` / `no-rate-limits` = ℹ 数据待刷新（跑一次工具调用即可）
+
 ### 4. Bash 权限集 (settings.local.json)
 
 - Read `<project-root>/.claude/settings.local.json`（不存在跳过）
@@ -219,6 +230,9 @@ cc-bot doctor — <project.display_name 或 project-root basename>
 
 ## poll.js 实例 / 配额（issue #23）
 <跨项目 poll.js 枚举 + 孤儿判定 + 本项目空转 calls/day·month 投影>
+
+## Claude 额度（v0.1.47+）
+<5h used% + 阈值 + 重置时刻；HUD 不可用时提示预警静默中>
 
 ## 权限扫描
 <零僵尸则 ✓ "未发现硬编码旧版本路径"；否则列出僵尸条目>
