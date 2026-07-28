@@ -77,7 +77,7 @@
   <td align="center" width="25%"><h3>⊙</h3><b>Auto Redact</b><br/><sub>token / 真名 / 飞书 ID /<br/>邮箱 / 手机号 发群前强制 scrub</sub></td>
   <td align="center" width="25%"><h3>▣</h3><b>Crash-resistant</b><br/><sub>3-layer defense<br/>PID lock · EPIPE · state heal</sub></td>
   <td align="center" width="25%"><h3>⊕</h3><b>Code-driven</b><br/><sub>permission / intent / dispatch /<br/>redact 全代码化，prose 不膨胀</sub></td>
-  <td align="center" width="25%"><h3>█▌</h3><b>HUD-aware</b><br/><sub>statusline shim<br/>tees cc-hud if installed</sub></td>
+  <td align="center" width="25%"><h3>█▌</h3><b>HUD-aware</b><br/><sub>statusline shim · tees cc-hud<br/>5h 额度快满自动预警群里</sub></td>
 </tr>
 </table>
 
@@ -206,7 +206,7 @@ Every step is **idempotent** — rerun safely. Then **`/cc-bot:start`** — bot 
 ## How It Works
 
 ```
-Main session ── Monitor(persistent) ── node poll.js ── lark: every 10s IMAdapter.listRecentMessages()
+Main session ── Monitor(persistent) ── node poll.js ── lark: every 60s IMAdapter.listRecentMessages()
                                                        slack: Socket Mode WebSocket push (event-driven)
                                                     ├─ dedupe via state.last_processed_time + poll.emitted
                                                     └─ stdout: NEW_MSG|msg_id|sender|text|ts
@@ -222,7 +222,7 @@ Main session ── Monitor(persistent) ── node poll.js ── lark: every 1
 
 <table>
 <tr>
-  <td align="center"><b>HTTP polling (lark)</b><br/><sub>10s default interval · VPN-proxy safe</sub></td>
+  <td align="center"><b>HTTP polling (lark)</b><br/><sub>60s default interval · VPN-proxy safe</sub></td>
   <td align="center"><b>Socket Mode push (slack)</b><br/><sub>WebSocket event-driven<br/>mainBusy still emits</sub></td>
   <td align="center"><b>3-layer defense</b><br/><sub>PID lockfile · EPIPE self-kill<br/>state future-value heal</sub></td>
   <td align="center"><b>Per-project isolation</b><br/><sub>.cc-bot/ per project<br/>zero cross-contamination</sub></td>
@@ -243,6 +243,7 @@ Main session ── Monitor(persistent) ── node poll.js ── lark: every 1
 | `runtime/ack-detect.js` | 短消息 ACK 语义判定（yes / continue / ok / thanks + 停止词否决）+ 推荐回复 |
 | `runtime/dispatch.js` | agents.json 调度生命周期（evaluate / register / complete / **sweep**）— tags 冲突 + slot + 同 user 串行全代码化。v0.1.33+ register 同步预热流式卡片（首帧 6-10s → 1-2s）；v0.1.35+ register 响应带 `preheated:bool` 让 SKILL.md 一行判要不要回群占位；v0.1.37+ `sweep` 子命令按 `profile.dispatch.max_turn_time_mins`（默认 0=不启用）回收超时 running + 释放 slot + agents.json `version` 字段 CAS 防 lost update |
 | `runtime/profile-migrate.js` | 版本化 profile schema migration — 升级时自动 backfill 历史新增字段，不覆盖用户已设值 |
+| `runtime/quota-alert.js` | v0.1.47+ Claude 5h 额度预警 — 读 HUD 的 `rate_limits.five_hour`，跨 85 / 95 / 耗尽 三档各发群一条 ≤2 行提示（`resets_at` 当窗口键去重，窗口滚动自动清零 + 补发「已恢复」）。耗尽期群消息走 `busy-held` 暂存不 emit，恢复后补推。判定放 poll.js 是因为它是独立进程**不吃额度**，额度耗尽时唯一还能开口的组件。开关 / 阈值见 `profile.quota_alert`（默认开，85 / 95）|
 | `runtime/todo-bridge.js` | v0.1.32+ CC `PreToolUse` hook bridge — 主会话调 TodoWrite / TaskCreate / TaskUpdate 时自动 diff todos 变化 → spawn streaming-card.js 把进度（▸ 进行中 / ✓ 完成）推到当前 running 任务的卡片，**worker 端零负担**（hook 异步 detached 不阻塞主会话）|
 
 **设计原则**：决策、转换、状态管理代码化，prose（SKILL.md / worker.md）只描述"调哪个命令、按返回 action 走"，**LLM 推理负担和文档膨胀双降**。
