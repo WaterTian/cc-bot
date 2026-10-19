@@ -54,6 +54,9 @@ const MIGRATIONS = [
   { version: '0.1.49', path: 'permission_bridge.enabled',          default: false },
   { version: '0.1.49', path: 'permission_bridge.mode',             default: 'notify' },
   { version: '0.1.49', path: 'permission_bridge.wait_secs',        default: 90 },
+  { version: '0.1.50', path: 'heartbeat',                         default: {} },
+  { version: '0.1.50', path: 'heartbeat.stall_mins',              default: 0 },
+  { version: '0.1.50', path: 'heartbeat.notify_recovered',        default: true },
   // v0.1.27 曾加 im.streaming_card.short_threshold=100；v0.1.30 改为换行判据，字段不再被读取。
   // migration 移除——老 profile 留着此字段无害（代码不读），新 profile 不再 backfill。
 ]

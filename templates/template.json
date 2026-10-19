@@ -89,6 +89,12 @@
     "hold_messages_when_exhausted": true
   },
 
+  "heartbeat": {
+    "_comment": "v0.1.50+ 主会话假死告警（runtime/stall-alert.js，issue #4）。poll.js 把一条群消息 emit 给主会话后，若 stall_mins 内主会话毫无动静（statusline 心跳 hud-stdin.json 不更新 / 没派单 agents.json 不变 / 群里没有 bot 发言），主动往群里发一条「⚠️ 主会话似乎卡住了」+ 终端 BOT_WARN + events.log —— 否则假死时群里和终端都是一片静默，没人会想起来跑 doctor。\n— stall_mins（缺省 0 = 关闭，与 dispatch.max_turn_time_mins 同约定）：等待分钟数，建议 10~15。太小会把「主会话正在为上一条消息跑长任务」误报成卡住（文案留了余地：似乎卡住了）；同一次卡住每 30min 最多再提醒一次\n— notify_recovered（缺省 true）：报过卡住后主会话一有动静，补一条「✅ 已恢复响应」\n零额外 API 调用只看本地文件；终端用户占着主会话（main-busy 锁）期间不判，占位文案已说明情况；未装 statusline shim（无 hud-stdin.json）时不判并在 events.log 提示一次。",
+    "stall_mins": 0,
+    "notify_recovered": true
+  },
+
   "permission_bridge": {
     "_comment": "v0.1.49+ 权限桥（runtime/permission-bridge.js，CC PermissionRequest hook）。主会话弹「允许 / 拒绝」权限框时转发到群，解决人不在终端边 bot 卡在弹窗上的问题。\n— enabled（缺省 false）：总开关。setup 已把 hook 注册到 ~/.claude/settings.json，但不开此项 hook 立即静默退出，零影响\n— mode：'notify'（缺省，单向：群里发一条「🔐 需要授权」提示，终端照常等人）| 'approve'（双向：members.admin_open_ids 里的人回「允许 <id>」/「拒绝 <id>」即代答 CC；wait_secs 内无人回应交回终端 = fail-closed）\n— wait_secs（缺省 90，范围 10~540）：approve 模式等待时长\n安全：只认管理员；远端只能本次允许、绝不写 always-allow 规则；每次决策写 events.log 审计；发群前自动脱敏。bot paused 时不转发。",
     "enabled": false,

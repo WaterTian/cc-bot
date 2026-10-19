@@ -119,6 +119,14 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/quota-alert.js status --project <项目根>
 - `ok:true` → ℹ 「5h 额度 `<used>`%（阈值 `<warnAt>`/`<urgentAt>`，`<hhmm>` 重置）」；`level` 非 null 时补当前档位
 - `ok:false` → 按 `reason`：`disabled` = ℹ 已关闭；`hud-missing` / `hud-stale` = ⚠ 「HUD 无数据或超 15min 未更新，额度预警静默中」+ 指向 §5 statusline shim 检查；`window-expired` / `no-rate-limits` = ℹ 数据待刷新（跑一次工具调用即可）
 
+### 3.8. 主会话假死告警（v0.1.50+，issue #4）
+
+读 `profile.heartbeat.stall_mins`（缺省 0 = 关闭）：
+
+- `0` → ℹ 「假死告警未启用（heartbeat.stall_mins=0）」+ 一句建议：设 10~15 后，poll.js emit 群消息 N 分钟内主会话无动静会主动发群 + 终端 BOT_WARN
+- `>0` 且 `.cc-bot/runtime/hud-stdin.json` 不存在 → ⚠ 「假死告警已开但无 statusline 心跳，判定静默中」+ 指向 §5
+- `>0` → ℹ 「假死告警 N min」；再 `grep "stall-suspected\|stall-recovered" .cc-bot/runtime/events.log | tail -3`，有命中则原样列出（时间 + pending/hud 秒数 + msg id），供判断是真卡死还是长任务误报（误报多 → 建议调大 stall_mins）
+
 ### 4. Bash 权限集 (settings.local.json)
 
 - Read `<project-root>/.claude/settings.local.json`（不存在跳过）

@@ -27,6 +27,7 @@ cc-bot/
 │   ├── ack-detect.js            # v0.1.24+ 短消息 ACK 语义判定（yes/continue/ok/thanks + 停止词否决）+ 建议回复
 │   ├── bot-switch-detect.js     # issue #18 群消息开关词表检测 + tripwire 闸门 — poll.js 标 envelope FLAGS，start/stop.md pre-flight 读 tripwire 拒执行（三层防御之一）
 │   ├── quota-alert.js           # v0.1.47+ Claude 5h 额度预警 — poll.js 每 tick 读 hud-stdin.json 的 rate_limits.five_hour，跨 85/95/耗尽 三档发群（resets_at 当窗口键去重，窗口滚动自动清零 + 补发「已恢复」）；耗尽期走 busy-held hold 群消息，恢复后补推。判定放 poll.js 是因为它是独立进程不吃额度，耗尽时唯一还能开口
+│   ├── stall-alert.js           # v0.1.50+ 主会话假死告警（issue #4）— poll.js emit 后 heartbeat.stall_mins 内 HUD 心跳 / agents.json / 群内 bot 发言 三路本地信号都没动 → 发群「似乎卡住了」+ 终端 BOT_WARN + events.log，恢复补「已恢复」；默认 stall_mins=0 关；mainBusy 期间不判；零额外 API；发失败不记账下 tick 重发
 │   ├── dispatch.js              # v0.1.25+ agents.json 调度生命周期（evaluate / register / complete / ls）— tags 冲突 + slot + 同 user 串行全代码化；v0.1.33+ register 同步预热流式卡片（首帧 6-10s → 1-2s, issue #15）+ complete 兜底 finalize 孤儿"● 处理中"卡；v0.1.35+ register 响应加 `preheated:bool`，SKILL.md 据此一行判要不要回群占位（不再 LLM 推 lark+flag）；v0.1.37+ `sweep` 子命令 + agents.json `version` CAS — poll.js 每 tick 按 `profile.dispatch.max_turn_time_mins`（默认 0=不启用）扫超时 running，finalize 卡片为「任务超时」+ 释放 slot；不杀 worker 进程
 │   ├── profile-migrate.js       # v0.1.29+ 版本化 profile schema migration — setup 跑 apply backfill 历史新增字段，doctor 跑 check 列 missing
 │   ├── todo-bridge.js           # v0.1.32+ CC PreToolUse hook bridge — 主会话 TodoWrite/TaskCreate/TaskUpdate 触发时自动 diff todos → spawn streaming-card.js 把进度推到当前 running 任务的卡片（worker 端零负担，hook 异步 detached 不阻塞主会话）

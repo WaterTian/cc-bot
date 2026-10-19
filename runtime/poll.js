@@ -38,6 +38,7 @@ const { atomicWriteSync } = require('./atomic-write')
 const dispatchModule = require('./dispatch')
 const botSwitchDetect = require('./bot-switch-detect')
 const quotaAlert = require('./quota-alert')
+const stallAlert = require('./stall-alert')
 const { createAdapter } = require('../adapters/factory')
 
 // ========== 参数解析 ==========
@@ -112,6 +113,9 @@ const PAGE_SIZE = 10
 // 同样是 1 次计费调用，加页不加成本（issue #23 口径）。
 const HOLD_PAGE_SIZE = 30
 const QUOTA_CHECK_INTERVAL_MS = 60 * 1000  // push 模式没有 tick 循环，额度检查单挂定时器
+const STALL_CHECK_INTERVAL_MS = 60 * 1000  // slack push 同上：假死判定单挂定时器（lark push 由校对 tick 顺带做）
+// 主会话假死告警（v0.1.50+，issue #4）：判定 / 文案 / 节流全在 runtime/stall-alert.js，poll.js 只负责发 + 记账
+const stall = stallAlert.createTracker({ runtimeDir: RUNTIME_DIR, profile, locale: LOCALE })
 const EMITTED_MAX = 200
 const VALID_TYPES = new Set(['text', 'post', 'file', 'image'])
 const FAIL_ALERT_THRESHOLD = 4
@@ -511,6 +515,7 @@ function emitNewMsg(m) {
     // 检测失败不阻 emit；最坏退到 layer 2/3 防御
   }
   console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}${flags}`)
+  try { stall.noteEmit(m.id) } catch {}  // 假死告警计时起点（issue #4）
 }
 
 // ========== 主会话优先级：锁检测 + 占位 ==========
@@ -634,6 +639,32 @@ async function checkQuotaAndNotify({ holdCapable = true } = {}) {
   return { hold }
 }
 
+// ========== 主会话假死告警（v0.1.50+，issue #4）==========
+//
+// 判定 / 文案 / 节流在 runtime/stall-alert.js；本函数只负责「发」+「记账」。
+// 发成功才 commit；失败不记 → 下一 tick 重判重发。告警同时打到 stdout（终端 Monitor 可见）+ events.log，
+// 回应 issue #4「假死时群里和终端均无信号」。
+async function runStallCheck({ mainBusy = false, botMsgMaxTime = 0 } = {}) {
+  if (!stall.enabled) return
+  let d
+  try {
+    d = stall.check({ mainBusy, botMsgMaxTime })
+  } catch (e) {
+    logEvent(`BOT_WARN|poll.js|stall-check-error|${(e && e.message) || e}`)
+    return
+  }
+  if (!d) return
+  if (d.action === 'none') { if (d.log) logEvent(d.log); return }
+  try {
+    await adapter.sendText({ chatId: CHAT_ID, text: d.text })
+    stall.commit(d)
+    logEvent(d.log)
+    if (d.action === 'alert') console.log(d.log)
+  } catch (e) {
+    logEvent(`BOT_WARN|poll.js|stall-alert-send-failed|${d.action}|${(e && e.message) || e}`)
+  }
+}
+
 async function tick() {
   if (!checkStdoutTolerance()) return
   verifyLock()
@@ -667,10 +698,12 @@ async function tick() {
       console.log(`BOT_ERROR|poll.js|adapter 连续失败 ${consecutiveFailures} 次，可能认证过期或网络故障`)
       alertedOnce = true
     }
+    await runStallCheck({ mainBusy })  // 拉取失败不影响本地信号判定
     return
   }
   if (msgs.length === 0) {
     logDebug(`tick|lastTime=${state.last_processed_time}|msgs=0|busy=${mainBusy}|quotaHold=${quotaHold}|held=${busyHeld.size}`)
+    await runStallCheck({ mainBusy })
     return
   }
 
@@ -681,6 +714,7 @@ async function tick() {
   const newlyEmitted = []
   let busySeenNew = false
   let busyHeldDirty = false
+  let botMsgMaxTime = 0  // 本 tick 看到的 bot 自己发言的最大 createTimeMs（假死告警的「已接手」信号之一）
   // 过滤理由分布（debug 用）
   const reasons = { id: 0, emitted: 0, bot: 0, type: 0, time: 0, atOthers: 0, held: 0, emitNow: 0, lateRelease: 0 }
 
@@ -692,7 +726,11 @@ async function tick() {
       if (busyHeld.has(m.id)) { busyHeld.delete(m.id); busyHeldDirty = true }
       continue
     }
-    if (m.senderType === 'bot') { reasons.bot++; continue }
+    if (m.senderType === 'bot') {
+      reasons.bot++
+      if (m.createTimeMs > botMsgMaxTime) botMsgMaxTime = m.createTimeMs
+      continue
+    }
     if (!VALID_TYPES.has(m.type)) { reasons.type++; continue }
 
     // busy-held：在 hold 列表里的消息绕过 lastTime 过滤（issue #9）
@@ -737,6 +775,7 @@ async function tick() {
   if (mainBusy && busySeenNew) await sendMainBusyPlaceholder({ degraded, lockTs })
   if (newlyEmitted.length > 0) appendEmitted(newlyEmitted)
   logDebug(`tick|lastTime=${lastTime}|msgs=${msgs.length}|busy=${mainBusy}|quotaHold=${quotaHold}|held=${busyHeld.size}|reasons=${JSON.stringify(reasons)}`)
+  await runStallCheck({ mainBusy, botMsgMaxTime })
 }
 
 // self-poll 单次模式：跑一次拉取，输出新消息到 stdout 后退出（由 /loop 每轮驱动，不依赖 Monitor）。
@@ -890,6 +929,9 @@ if (ONCE_MODE) {
     const reconcilesPerDay = Math.round((86400 * 1000) / RECONCILE_INTERVAL_MS)
     console.log(`BOT_INFO|poll.js|quota-projection|lark push（事件长连接，不计配额）+ 校对轮询 @ ${Math.round(RECONCILE_INTERVAL_MS / 1000)}s：空转≈${reconcilesPerDay} calls/day；长连接不可用自动回落 polling @ ${Math.round(CHECK_INTERVAL_MS / 1000)}s`)
   }
+  if (stall.enabled) {
+    console.log(`BOT_INFO|poll.js|stall-alert|主会话假死告警已开：emit 后 ${Math.round(stall.cfg.stallMs / 6000) / 10}min 内 HUD 心跳 / agents.json / 群内 bot 发言都无动静 → 发群 + 终端 BOT_WARN；mainBusy 期间不判，同一次每 30min 最多再提醒一次`)
+  }
   if (IM_MODE === 'push') {
     setTimeout(startPushMode, 1000)
     if (!LARK_PUSH_OPTIN) {
@@ -899,6 +941,13 @@ if (ONCE_MODE) {
       setInterval(() => {
         checkQuotaAndNotify({ holdCapable: false }).catch(() => {})
       }, QUOTA_CHECK_INTERVAL_MS)
+      if (stall.enabled) {
+        // 假死告警同理单挂定时器；paused 时不打扰群里
+        setInterval(() => {
+          if (readState().paused) return
+          runStallCheck({ mainBusy: checkMainBusy().busy }).catch(() => {})
+        }, STALL_CHECK_INTERVAL_MS)
+      }
     }
   } else {
     tickTimer = setTimeout(scheduleTick, 1000)

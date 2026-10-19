@@ -366,6 +366,18 @@ Guard rails: default **off**; only admins are honoured; remote approval is **thi
 
 <br/>
 
+## Stall Alert — active heartbeat for a hung main session (v0.1.50+)
+
+`/cc-bot:doctor` and `events.log` are passive: when the main session hangs, nobody is at the terminal to run them, and the group only sees a bot that stopped talking (issue #4). The stall alert lives in poll.js, a separate process that keeps running when the main session does not:
+
+```json
+"heartbeat": { "stall_mins": 10, "notify_recovered": true }
+```
+
+After poll.js hands a group message to the main session it watches three **local** signals: the statusline heartbeat (`hud-stdin.json` mtime), the dispatch ledger (`agents.json` mtime) and the bot's own replies in the chat. If none of them moves for `stall_mins`, it posts `⚠️ 主会话似乎卡住了：N 分钟前收到的群消息还没被处理…` to the group, prints `BOT_WARN|poll.js|stall-suspected` in the terminal and logs it; once the session moves again it posts `✅ 主会话已恢复响应`. Zero extra API calls. Off by default (`stall_mins: 0`); silent while a terminal user holds the main-busy lock (the busy placeholder already covers that); re-reminds at most every 30 min; needs the statusline shim (`/cc-bot:setup` installs it, doctor §3.8 / §5 check it).
+
+<br/>
+
 ## Privacy Protection
 
 **两层防御**：
