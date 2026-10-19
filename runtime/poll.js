@@ -24,14 +24,14 @@
 //
 // 三层防御（2026-04-20 polling 架构三坑对策，不可删除）：
 //   ① PID lockfile 单例锁 — 启动旧进程活则落 last-startup-error.json + exit 0；每 tick 校验 pid 文件仍是自己
-//   ② stdout EPIPE 容错自杀 — 单轮不可写 skip 当轮，连续 3 轮（~90s）才 exit 防污染 poll.emitted；
+//   ② stdout EPIPE 容错自杀 — 单轮不可写 skip 当轮，连续 3 轮（≈3 个 tick：默认 60s → 3min，lark push 校对 5min → 15min）才 exit 防污染 poll.emitted；
 //      退出前写 events.log 留诊断痕迹（瞬断不死，真断才死）
 //   ③ state.last_processed_time 未来值防御 — 超 now+60s 自愈 + emit BOT_ERROR
 //
 // 注：v0.1.11 试过 Defense ④ 父进程死亡自杀（ppid 重读 / process.kill(pid,0) 探活），但 cc-bot-test
 // Windows 实测发现进程链 CC → bash → poll.js 中 CC 死后 bash 孤儿不死，poll.js.ppid（=bash PID）不变
 // → 检测失效；POSIX 推测同因（bash 被 init/launchd 接管但仍活）。撤回，待跨平台反向追溯 CC PID 方案
-// 成熟再补（v0.1.12+ 候选）。CC 崩溃场景由 ② EPIPE 90s 兜底（实战验证稳）。
+// 成熟再补（v0.1.12+ 候选）。CC 崩溃场景由 ② EPIPE 连续 3 tick 兜底（实战验证稳）。
 
 const fs = require('fs')
 const path = require('path')

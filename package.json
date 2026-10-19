@@ -19,7 +19,6 @@
     "LICENSE"
   ],
   "scripts": {
-    "smoke": "node runtime/poll.js --project .",
     "release": "node scripts/release.js"
   },
   "keywords": [

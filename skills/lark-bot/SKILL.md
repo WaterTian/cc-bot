@@ -12,7 +12,7 @@ description: 飞书群 AI 项目助手 — 监听群消息，识别自然语言�
 | 操作 | 做法 |
 |------|------|
 | 当前 profile | `.cc-bot/profiles/active.json`（Claude 启动时读它） |
-| 切换项目 | 说"切换到 xxx 项目" → 把 `.cc-bot/profiles/xxx.json` 内容拷到 `active.json` |
+| 切换项目 | 说"切换到 xxx 项目" → 走 `/cc-bot:switch xxx`（先停 bot、换 active.json、重置 state.json、清 poll.emitted）；**不要**手工拷文件，会带着旧游标和去重表跑 |
 | 新增项目 | 复制 `.cc-bot/profiles/template.json` 为 `.cc-bot/profiles/<name>.json`，按注释填好 |
 
 ## 总开关
@@ -97,7 +97,7 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
 - 全程主会话**主动调常驻工具**（Bash + lark-cli + /loop），不碰 Monitor / notification / ToolSearch —— 绕开弱端点死结。
 - 启动见 `/cc-bot:start` self-poll 分支（不开 Monitor，发完通知后 `/loop <self_poll_interval，缺省 3m> /cc-bot:poll-once`）；单轮逻辑见 `/cc-bot:poll-once`。
 - **代价**：轮询驱动，无消息时空转也耗 token（vs monitor 事件驱动空闲零消耗）；DeepSeek 端点 prompt 缓存失效（`cache_control` ignored），每轮全量 input。间隔越大越省，项目助手 3~5m 延迟可接受。
-- 停止：`paused=true` 软停（poll-once 经 poll.js --once 读到 paused 立即返回不处理）；彻底结束循环需中断运行 /loop 的会话。
+- 停止：`/cc-bot:stop` —— `CronDelete` 掉 /loop 建的 cron 任务（id 在 start 那轮 /loop 的输出里，拿不到就 `CronList` 找命令含 `/cc-bot:poll-once` 的）+ `paused=true` 双保险（poll-once 读到 paused 立即返回不处理）。
 - 详见 memory `reference_deepseek_agentic_incompatible`。**默认 monitor，仅显式配 self-poll 才走这套。**
 
 **IM Adapter 层**：`adapters/base.js` 定义接口（`listRecentMessages` / `sendText` / `sendImage` / `downloadResource` / `getUser` / `addReaction`，push 模式再加 `startListening` / `stopListening`），已有 `adapters/lark.js`（飞书，包 `lark-cli`）和 `adapters/slack.js`（Socket Mode）；`adapters/factory.js` 按 `profile.im.type` 实例化，poll.js 与 permission-bridge 共用。加企业微信 / 钉钉等只需新增 adapter 文件 + factory 分支 + profile 里改 `im.type`。
@@ -109,7 +109,7 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
 应对 2026-04-20 polling 架构三坑：
 
 1. **PID lockfile 单例锁** — 启动写 `.cc-bot/runtime/poll.pid`，若已有活进程则 `exit 0`；每 tick `verifyLock()` 校验 pid 仍是自己，被抢则自杀
-2. **stdout EPIPE 容错自杀** — 单轮 `process.stdout.writable=false` 或 `stdout.on('error', EPIPE)` 时计数 `epipeStreak++` + skip 当轮 tick（**不立即退出**）；连续 3 轮（~90s）都不可写才 `exit 1`，退出前 `events.log` 写 `BOT_ERROR|poll.js|stdout-*-streak-3|...` 留诊断。瞬断不死、真断才死，避免 Monitor 管道抖动导致 bot 静默死亡
+2. **stdout EPIPE 容错自杀** — 单轮 `process.stdout.writable=false` 或 `stdout.on('error', EPIPE)` 时计数 `epipeStreak++` + skip 当轮 tick（**不立即退出**）；连续 3 轮（≈3 个 tick：默认 60s → 3min；lark push 校对间隔 5min → 15min）都不可写才 `exit 1`，退出前 `events.log` 写 `BOT_ERROR|poll.js|stdout-*-streak-3|...` 留诊断。瞬断不死、真断才死，避免 Monitor 管道抖动导致 bot 静默死亡
 3. **state 未来值防御** — `last_processed_time > Date.now()+60s` 自愈降到 `now-60s`，emit `BOT_ERROR|poll.js|state-future-timestamp|...`
 
 ### @他人消息过滤（v0.1.10+）
@@ -125,7 +125,7 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
 
 **保守模式**：未配 `im.bot_open_id` 时，群里任何 @ 一律不响应。这符合"@他人不搭理"的纯降噪诉求；副作用是 @ bot 也会被忽略，用户用自然语言无 @ 即可触发 bot。
 
-**精准模式**：在 `.cc-bot/profiles/active.json` 的 `im.bot_open_id` 填 bot 应用的 open_id（`ou_xxx` 形式），可从 bot 发过的消息 sender.id 反查，或飞书开放平台「应用信息」页查看。
+**精准模式**：在 `.cc-bot/profiles/active.json` 的 `im.bot_open_id` 填 bot 应用的 open_id（`ou_xxx` 形式）。拿法：让群里任意成员发一条 `@<bot 名> hi`，`lark-cli im +chat-messages-list --as bot --chat-id <chat_id> --page-size 5 --sort desc` 取那条的 `mentions[]` 里 key 为 bot 名的 `id.open_id`（bot 自己发的消息 `sender.id` 是 `cli_` 应用 id，**反查不到** ou_）。
 
 被过滤的消息直接进 `poll.emitted` 视为已处理，不会跨 tick 重判。
 
@@ -161,7 +161,7 @@ Read profile  ──┐
 
 #### 明确**不做**的事
 
-- ❌ **不清孤儿进程** — poll.js 的 PID lockfile（三层防御①）已兜底：启动时撞活进程即 `exit 0`；撞死 pid 文件由 `acquireLock()` 自动覆盖；CC 崩溃后旧 poll.js 由 ② EPIPE 90s 兜底自杀，无需主会话跑 `powershell Get-CimInstance`（Windows）/ `pgrep -f` + `kill`（macOS/Linux）这种慢 2-5s 的全局扫描
+- ❌ **不清孤儿进程** — poll.js 的 PID lockfile（三层防御①）已兜底：启动时撞活进程即 `exit 0`；撞死 pid 文件由 `acquireLock()` 自动覆盖；CC 崩溃后旧 poll.js 由 ② EPIPE 连续 3 tick 兜底自杀，无需主会话跑 `powershell Get-CimInstance`（Windows）/ `pgrep -f` + `kill`（macOS/Linux）这种慢 2-5s 的全局扫描
 - ❌ **不跑 `TaskOutput` 验证 running 状态** — Monitor 启动无 error 即视为成功；若 poll.js 内部报错，下一轮轮询它会 emit `BOT_ERROR|poll.js|...` 到 Monitor stdout
 - ❌ **不做冗余自检**（lark-cli --version / 路径存在性等）— setup 已验过，真失败时下游第一次 lark-cli 调用会报
 
@@ -228,8 +228,8 @@ Context · {bar} X%
 | `.cc-bot/runtime/state.json` | 运行时状态（paused / last_processed_time / pending_confirm / monitor_task_id） |
 | `.cc-bot/runtime/poll.pid` | poll.js 单例锁 pid 文件（启动时写入，退出时清理） |
 | `.cc-bot/runtime/poll.emitted` | 已推送 message_id 去重表（最近 200 条） |
-| `.cc-bot/runtime/hud-stdin.json` | HUD 数据（cc-hud 写入） |
-| `.cc-bot/runtime/agents.json` | 多 agent 调度 registry（running / queue；启动时空态，详见 §消息调度） |
+| `.cc-bot/runtime/hud-stdin.json` | HUD 数据（**cc-bot 的 statusline shim** `runtime/statusline.js` 每次状态栏刷新落盘，setup Stage E step 7 注册；cc-hud 只是渲染器） |
+| `.cc-bot/runtime/agents.json` | 多 agent 调度 registry（running / queue / version；缺失自动建空态，**重启不自动清**，详见 §消息调度） |
 | `.cc-bot/runtime/main-busy.lock` | 主会话忙碌锁（CC UserPromptSubmit 写 / Stop 删；poll.js 读；10min 过期自动清，详见 §主会话优先级） |
 | `.cc-bot/runtime/main-busy-notified.flag` | 群占位消息全局节流时间戳（v0.1.16+：mtimeMs = 上次发占位时刻；与 lock 生命周期解耦，unlock 不再清；详见 §主会话优先级 占位策略） |
 | `.cc-bot/runtime/poll.busy-held` | busy 期间 hold 的 msg id（v0.1.20+，issue #9 修复）：JSON `{id: {ts}}`；主窗口忙时新消息进此表不 emit，下一 tick 绕过 lastTime 过滤直到 emit 成功；10min TTL 兜底清理 |
@@ -395,7 +395,7 @@ LLM 职责收窄到「判语义匹配哪个 key」；占位符替换 / hint 摘�
    - admin 触发危险操作 → 直接执行，不写 `pending_confirm`
    - member 触发"仅管理员"操作 → 拒绝
    - 其他危险操作的非 admin → 写 `pending_confirm`（15 min 超时）
-   - `lark-cli im +messages-reply --as bot --message-id <msg_id>` 回复（依赖 reply 引用上下文，正文不具名 — 见 §角色与权限 §群里称呼）
+   - lark：`lark-cli im +messages-reply --as bot --message-id <msg_id>` 回复（依赖 reply 引用上下文，正文不具名 — 见 §角色与权限 §群里称呼）；slack：`node ${CLAUDE_PLUGIN_ROOT}/runtime/slack-send.js send-text --project <root> --text "..."`，**多群时加 `--channel <该条 NEW_MSG 的 CHAT>`**（不带就发到主群）
 8. **推进 state.json**：Edit `last_processed_time = time`（`time` = NEW_MSG 第 5 段的 `createTimeMs` 毫秒戳，见 §最高优先级规则 1 格式规范；多群模式下 poll.js 另有每群游标 `poll.cursors.json` 自动推进，本步照旧做即可）
 
 ### Bug 报告处理节奏（多 bug 密集会话）
@@ -441,7 +441,7 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 60s（�
 但以下三种场景仍需 API 兜底（直接调 `lark-cli im +chat-messages-list` 对比 `state.json.last_processed_time`，不走 poll.js / poll.emitted 通道）：
 
 1. **Monitor task 挂掉**：`TaskGet(task_id)` 返回 `Task not found` / `failed` / `completed`（非 persistent 内预期状态）
-2. **poll.js 连续失败告警**：主会话收到 `BOT_ERROR|poll.js|lark-cli 连续失败 N 次` notification
+2. **poll.js 连续失败告警**：主会话收到 `BOT_ERROR|poll.js|adapter 连续失败 N 次，可能认证过期或网络故障` notification
 3. **用户主动问"群里有消息吗 / 新消息吗 / hello?"**：不凭记忆回答，立即 fetch 核对（和「最高优先级规则 2」的 fetch_before_reply 一致）
 
 `poll.emitted` 是 poll.js 内部去重表，**绝不要手动清空**（会导致历史消息被当新消息重推刷屏）。
@@ -463,6 +463,7 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 60s（�
 
 ```json
 {
+  "version": 7,
   "slots_max": 3,
   "running": [
     {
@@ -473,6 +474,7 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 60s（�
       "intent": "fix_login_bug",
       "tags": ["write:src/auth", "net:push"],
       "started_at": "2026-04-22T10:00:00Z",
+      "started_at_ms": 1776852000000,
       "subagent_count": 1
     }
   ],
@@ -490,10 +492,10 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 60s（�
 }
 ```
 
-文件读写由 `runtime/dispatch.js` 接管（v0.1.25+，主会话不直接 Edit），缺失自动建空态。重启 bot 时 registry 全清（和 `poll.emitted` 同策略，subagent 会随主会话 stop 失去监听）。
+文件读写由 `runtime/dispatch.js` 接管（v0.1.25+，主会话不直接 Edit；`version` 字段是 CAS 计数，别手改），缺失自动建空态。**重启 bot 不会自动清 registry**：上一会话残留的 `running` 会继续占 slot / 触发同 user 串行，`/cc-bot:doctor` §3 会提示；确认没有 worker 在跑时 `node dispatch.js ls --project <root>` 看一眼后 `rm .cc-bot/runtime/agents.json` 即可（下次自动建空态）。
 
 **字段格式规范**：
-- `started_at` / `queued_at`：**ISO 8601 字符串**（如 `"2026-04-22T10:00:00Z"`），用于人类可读 debug 和超时判定（主会话用 `new Date(x).getTime()` 换算）
+- `started_at` / `queued_at`：**ISO 8601 字符串**（人类可读 debug 用）；`started_at_ms` 是毫秒戳，超时判定由 poll.js 每 tick 调 `dispatch.js sweep` 按它 + `profile.dispatch.max_turn_time_mins`（默认 0 = 不启用）自动做，主会话不自己算
 - `state.json.last_processed_time`：**毫秒时间戳**（见 §最高优先级规则 1）——两者格式故意不同，不要混用
 
 ### 分派决策表
@@ -529,7 +531,7 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 60s（�
 
    action 含义 + 应对：
    - `dispatch` → 派 worker（步骤 5）
-   - `queue`    → 回群"收到。前面 `queuePosition` 个任务在跑，排到后开始"，推 state，本响应结束。reason 见下
+   - `queue`    → 回群"收到，排在第 `queuePosition` 位，前面的跑完就开始"（`queuePosition` = running + queue 总数，含自己），推 state，本响应结束。reason 见下
    - `reject`   → reason=`queue_full`，回"任务队列已满（10 条），稍后再试"
 
    reason（queue 时）：`slot_full` / `conflict:path-overlap:...` / `conflict:exclusive-tag:...` / `user_serial`。
@@ -537,7 +539,7 @@ polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 60s（�
 5. **dispatch 派单动作**：
    - **回群占位**：`preheated===true` → 跳过（卡已建好，hero "**接到任务：<subject>**\n\n排队中..."）；`preheated===false` → 发占位（lark 走 `+messages-reply` text；slack 走 `slack-send.js send-text`）。主会话不需要自己读 profile 判 lark / flag —— 看一个字段即可
    - 推 `state.json.last_processed_time = msg.create_time`
-   - 调 `Agent(subagent_type:'cc-bot:worker', run_in_background:true)`，prompt 只传 4 字段（任务描述 / `项目根` / `msg_id` / `plugin_root = ${CLAUDE_PLUGIN_ROOT}`）—— 其他规范都在 worker.md。预热场景下 worker 第一次 report 是 path 3c update（卡已建好）
+   - 调 `Agent(subagent_type:'cc-bot:worker', run_in_background:true)`，prompt 只传 4 字段（任务描述 / `项目根` / `msg_id` / `plugin_root = ${CLAUDE_PLUGIN_ROOT}`；**slack 多群时再加第 5 字段 `chat_id` = 该条 NEW_MSG 的 CHAT**，worker 据此 `--channel` 回对群）—— 其他规范都在 worker.md。预热场景下 worker 第一次 report 是 path 3c update（卡已建好）
    - 本响应结束，接下条 NEW_MSG
 
 ### Fan-out（单消息多 subagent 并行）
@@ -563,7 +565,7 @@ fan-out 任务（`subagent_count > 1`）：等**所有**子 agent 完成再调 c
 ### 队列上限 / 超时
 
 - 队列 10 上限（QUEUE_LIMIT，dispatch.js 常量）：register 返回 `action:'reject', reason:'queue_full'` 时回"任务队列已满，稍后再试"
-- 单任务预计 > 30min（大型部署）先警告用户确认再派；卡住无响应靠 §Monitor 异常重启 兜底
+- 单任务预计 > 30min（大型部署）先警告用户确认再派；卡死回收靠 `profile.dispatch.max_turn_time_mins`（默认 0 = 不启用；设了之后 poll.js 每 tick `dispatch.js sweep` 把超时 running 的卡片收口为「任务超时」并释放 slot，不杀 worker 进程）
 
 ### 与 §Agent 优先策略 的关系
 
@@ -853,7 +855,7 @@ lark-cli im +messages-send --as bot --chat-id X \
 - `+messages-reply` 同理
 - **--text 内容含反引号 `` ` ``** — 双引号里的反引号会触发 command substitution，改用中文引号「」或转义 `` \` ``
 
-**推荐：双引号 + 字面换行**（多行直接在引号内换行）
+**备选（仅 macOS / Linux，单行或简单多行）：双引号 + 字面换行**——Windows 一律走上面的 JSON content，不要用这条
 ```bash
 lark-cli im +messages-reply --as bot --message-id om_xxx --text "第一行
 第二行"
@@ -863,7 +865,7 @@ lark-cli im +messages-reply --as bot --message-id om_xxx --text "第一行
 
 ## HUD 状态推送
 
-HUD 数据由独立插件 **cc-hud** 写入 `.cc-bot/runtime/hud-stdin.json`。cc-bot 本身不生产 HUD 数据，只消费。
+HUD 数据由 **cc-bot 自己的 statusline shim**（`runtime/statusline.js`，setup Stage E step 7 注册到 `~/.claude/settings.json` 的 `statusLine.command`）在每次状态栏刷新时落盘到 `.cc-bot/runtime/hud-stdin.json`；装了 cc-hud 时 shim 再透传给它渲染。缺文件 = shim 没注册，不是没装 cc-hud。
 
 ### HUD 不可用时的处理（hud-stdin.json 缺失或空）
 
@@ -928,7 +930,7 @@ HUD 不可用时（§HUD 不可用时的处理）：`zh-CN` → "HUD 数据暂�
 
 - lark-cli 回复失败 → 跳过继续
 - 操作超时（>2 min）→ 回"操作超时，请稍后重试"
-- 状态文件损坏 → 重建默认状态 `{"last_processed_time":"0","pending_confirm":null,"paused":true}`
+- 状态文件损坏 → 重建默认状态 `{"last_processed_time":"<Date.now() 毫秒>","pending_confirm":null,"paused":true,"monitor_task_id":null}`（**不要写 `"0"`**：游标归零会把拉取窗口里的旧消息全部当新消息 emit）
 - `.cc-bot/profiles/active.json` 缺失 → 回"未配置 profile，请先复制 template.json 或切换项目"
 
 ### Monitor 异常重启

@@ -79,7 +79,7 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/bot-switch-detect.js gate --project <project.
        --project <project.root> \
        --text "<上线模板>"
      ```
-     - 默认发主流（跟飞书行为对齐 — Slack 不进 thread）。仅显式回某条消息时加 `--reply-to <ts>`
+     - 固定发主流（跟飞书行为对齐 — Slack 不进 thread；slack-send.js 没有 thread / reply-to 选项）
      - Token 脚本自读 `.cc-bot/profiles/active.json` 的 `im.extra.bot_token`，**不要**手工拼 token 进命令行
 
      **上线模板**（按 `im.locale` 选；不含 used/total 与帮助提示）：
@@ -100,7 +100,7 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/bot-switch-detect.js gate --project <project.
 
 ### 明确不做（精简过的动作，附回滚条件）
 
-- ❌ 不跑 `powershell Get-CimInstance` 清孤儿 — poll.js 的 PID lockfile（三层防御①）已兜底：启动时撞活进程即 `exit 0`，撞死 pid 由 `acquireLock()` 覆盖，CC 崩溃后旧 poll.js 由 ② EPIPE 90s 自杀
+- ❌ 不跑 `powershell Get-CimInstance` 清孤儿 — poll.js 的 PID lockfile（三层防御①）已兜底：启动时撞活进程即 `exit 0`，撞死 pid 由 `acquireLock()` 覆盖，CC 崩溃后旧 poll.js 由 ② EPIPE 连续 3 tick（默认 ≈3min）自杀
   - **回滚条件**：若发现同 project 多个 poll.js 同跑 / poll.emitted 重复写 / `BOT_INFO|lock-taken` 频发但老 pid 已死，恢复为 commit `a7f0b4b` 之前版本的 PowerShell 清孤儿步骤
 - ❌ 不跑 `TaskOutput` 验证 running — Monitor 启动无 error 即视为成功
   - **回滚条件**：若 Monitor 启动报成功但群消息长时间无 NEW_MSG 推送（TaskGet 状态异常），加回 `TaskOutput(task_id, block:false)` 验证

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // cc-bot PreToolUse hook bridge — 把 TodoWrite / TaskCreate / TaskUpdate 自动 mirror 到当前流式卡片。
 //
-// 设计：worker 接到任务后用 TodoWrite 管自己的待办（subagent 工具集 v0.1.32+ 含 TodoWrite），
-// 每次 TodoWrite 更新 → PreToolUse hook 触发 → 本桥读 cwd / agents.json / 缓存做 diff →
+// 设计：**主会话**用 TodoWrite / TaskCreate / TaskUpdate 管进度（worker subagent 工具集没有 TodoWrite，见 worker.md），
+// 每次更新 → PreToolUse hook 触发 → 本桥读 cwd / agents.json / 缓存做 diff →
 // 把新增 / 完成的待办行追加到 streaming-card.js report，群里实时看到 ▸ / ✓ 进度，
 // **worker 零额外报告负担**（worker 用 TodoWrite 本来就是 CC 标准管进度方式）。
 //

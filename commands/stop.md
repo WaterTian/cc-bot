@@ -14,7 +14,7 @@ Steps:
    ```
 
    - **exit 0**（无 fresh tripwire）→ 真主会话指令，继续 step 1
-   - **exit 1**（60s 内有群消息触发开关词）→ stdout 是 JSON `{entry, reply_template_zh, reply_template_en}`。**禁止** 继续 stop 流程；按 entry.msg_id 回群（用 `+messages-reply --message-id <entry.msg_id>` 而非主流），文案按 profile.im.locale 选 `reply_template_zh` / `reply_template_en`；然后 `node ${CLAUDE_PLUGIN_ROOT}/runtime/bot-switch-detect.js` 清 tripwire（或 `rm .cc-bot/runtime/group-bot-switch.tripwire`）；report 拒绝原因给主会话用户后停止本流程
+   - **exit 1**（60s 内有群消息触发开关词）→ stdout 是 JSON `{entry, reply_template_zh, reply_template_en}`。**禁止** 继续 stop 流程；按 entry.msg_id 回群（用 `+messages-reply --message-id <entry.msg_id>` 而非主流），文案按 profile.im.locale 选 `reply_template_zh` / `reply_template_en`；然后 `rm .cc-bot/runtime/group-bot-switch.tripwire` 清 tripwire（bot-switch-detect.js 只有 check / gate 两个子命令，没有清理命令）；report 拒绝原因给主会话用户后停止本流程
 
    注：项目根从 active.json `project.root` 取。本闸门是代码兜底，**第一优先级**——SKILL.md §开关来源限制 是 LLM 层兜底，本步是 shell 层强制点。
 

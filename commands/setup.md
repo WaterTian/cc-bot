@@ -40,7 +40,7 @@ AskUserQuestion({
 ```
 
 - 选「飞书」→ 设 `IM_TYPE = lark`，按本文档原 Stage A → B → D → E 走
-- 选「Slack」→ 设 `IM_TYPE = slack`，**跳过 Stage A**（无 CLI 需装），直接走 Stage B-slack → D-slack → E（Stage E 字段按 IM_TYPE 分流）
+- 选「Slack」→ 设 `IM_TYPE = slack`，**跳过 Stage A**（无 CLI 需装，但 Stage B-slack Step 0 会先验 SDK），直接走 Stage B-slack → D-slack → E（Stage E 字段按 IM_TYPE 分流）
 
 后续命令模板 / 字段格式按 IM_TYPE 分支选择；共享部分（statusline shim / main-busy hook / Monitor 通配权限 / gitignore）两边都跑。
 
@@ -135,6 +135,15 @@ AskUserQuestion({
 
 Slack 没有飞书 lark-cli 那种 OAuth Device Flow，需要用户手工去 api.slack.com 建 App。本 Stage 引导走完整套路。
 
+### Step 0 — 验证 Slack SDK 可加载
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/runtime/slack-send.js check
+```
+
+- `ok:true` → 继续（`from` 字段是实际加载路径，全局装 / 插件目录装都认）
+- `ok:false` → 跑 `npm i -g @slack/socket-mode @slack/web-api`（或在 `${CLAUDE_PLUGIN_ROOT}` 下 `npm install @slack/web-api @slack/socket-mode`），再 check 一次；仍失败 → 把 `searched` 列表报给用户（Node 只搜这些目录），停止 setup
+
 ### Step 1 — 提供 manifest + 引导建 App
 
 Read `${CLAUDE_PLUGIN_ROOT}/templates/slack-manifest.yaml` 整段内容，贴给用户加说明：
@@ -197,8 +206,8 @@ Tell user: `✓ token 有效 — Workspace: {WORKSPACE_NAME}, Bot: {BOT_NAME} ({
 
 ## Stage D — 选群 + 拿 chat_id（仅 `IM_TYPE = lark`）
 
-1. Run `LARK_CLI_NO_PROXY=1 lark-cli im chats list --as bot --format json`.
-2. Parse `data.items[]` from the JSON envelope. Each item has `chat_id` + `name`. Let **N** = item count.
+1. Run `LARK_CLI_NO_PROXY=1 lark-cli im +chat-list --as bot --format json --page-size 100`（**是 `+chat-list` 快捷命令**，不存在 `im chats list` 这种子命令；bot 身份返回它所在的全部群）。
+2. Parse `data.chats[]` from the JSON envelope（注意键名是 `chats` 不是 `items`；`data.has_more=true` 时用 `--page-token <data.page_token>` 翻页）. Each item has `chat_id` + `name`. Let **N** = item count.
 
 3. **If N == 0**: skip directly to sub-flow **D.new** (no selection UI — bot isn't in any chat yet so there's nothing to pick from).
 
@@ -361,6 +370,7 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
    - `im.type`: **IM_TYPE** from Stage 0 (`lark` 或 `slack`)
    - `im.chat_id`: **CHAT_ID**
    - `im.chat_ids`: `[]`（v0.1.51+ 多群：要同时服务多个群时手动填其它群的 chat_id 数组；主群仍是 `im.chat_id`，上下线通知 / 权限桥走主群，各群消息独立游标互不丢）
+   - `im.bot_open_id`: 留 `""`，并**提醒用户**：留空 = 保守模式，群里任何带 @ 的消息（包括 @bot）一律不响应，不带 @ 的消息正常处理；想让 @bot 生效 → 让群里任意成员发一条 `@<bot 名> hi`，然后 `LARK_CLI_NO_PROXY=1 lark-cli im +chat-messages-list --as bot --chat-id <CHAT_ID> --page-size 5 --sort desc`，取那条消息 `mentions[]` 里 key 为 bot 名的 `id.open_id`（`ou_…`）填进去（lark 专有；slack 的 @ 识别用 `bot_user_id`，setup 已自动填）
    - `im.chat_name`: **CHAT_NAME**
    - `project.root`: absolute path of current directory (forward slashes, e.g. `D:/Projects/foo`)
    - `paths.bot_temp_abs`: `{project.root}/.cc-bot/bot_temp` (forward slashes, e.g. `D:/Projects/foo/.cc-bot/bot_temp`)
@@ -694,7 +704,7 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
   - lark: `im.bot_app_id` 匹配 `/^cli_[a-z0-9]+$/` 且**不是** `cli_xxxxxxxxxxxx` 示例；`im.chat_id` 以 `oc_` 开头且长度 > 20
   - slack: `im.extra.bot_token` 匹配 `/^xoxb-/` 且 `im.bot_user_id` 匹配 `/^U[A-Z0-9]+$/`；`im.chat_id` 匹配 `/^C[A-Z0-9]+$/`
   - 判定为「已配置」→ 输出「已配置，可 /cc-bot:start」。**仍需复查**（共享，IM 无关）：
-    - **Profile 字段 migration（v0.1.28+）**：跑 `node ${CLAUDE_PLUGIN_ROOT}/runtime/profile-migrate.js apply --project <root>`，自动 backfill 历史新增字段（`busy_placeholder` / `busy_reaction` / `streaming_card` / `intent_permissions` / `privacy` / `dispatch` 等），不覆盖已设值，幂等可重复。返回 added count > 0 时在终端报「补全 N 个新版字段：[paths...]」
+    - **Profile 字段 migration（v0.1.29+）**：跑 `node ${CLAUDE_PLUGIN_ROOT}/runtime/profile-migrate.js apply --project <root>`，自动 backfill 历史新增字段（`busy_placeholder` / `busy_reaction` / `streaming_card` / `intent_permissions` / `privacy` / `dispatch` 等），不覆盖已设值，幂等可重复。返回 added count > 0 时在终端报「补全 N 个新版字段：[paths...]」
     - 若 `active.json` 的 `polling_mode` 字段缺失或空 → 按 Stage E step 4 的检测逻辑（读 `ANTHROPIC_BASE_URL` env）补写（幂等，可重复）
     - 若 `settings.json` 的 `statusLine.command` 未指向 cc-bot shim → 跑步骤 7 补注册（幂等，可重复）
     - 若 `settings.json` 的 `hooks.UserPromptSubmit` / `hooks.Stop` 无 cc-bot main-busy 命令 → 跑步骤 8 补注册（幂等）

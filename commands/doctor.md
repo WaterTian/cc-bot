@@ -14,7 +14,7 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 ### 1. Version
 
 - **Installed version**: Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` → `version`
-- **Active scopes**: Read `~/.claude/plugins/installed_plugins.json` → list every `cc-bot@cc-bot` entry (`scope` / `version` / `projectPath` / `installPath`). Mark:
+- **Active scopes**: Read `~/.claude/plugins/installed_plugins.json` → list every `cc-bot@cc-bot` entry（文件里每条只有 `scope` / `version` / `installPath` / `installedAt` / `lastUpdated`，**没有 projectPath**：`project` / `local` 作用域属于哪个项目要看该项目 `.claude/settings.json` 的 `enabledPlugins`）. Mark:
   - `user` scope missing → ✗ not installed globally
   - `project` scope for a **different** project than current → ℹ 与当前项目无关，保留
   - `project` scope for current project but `version` < `user` scope version → ⚠ stale project pin
@@ -31,8 +31,9 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 ### 2. Profile (`.cc-bot/profiles/active.json`)
 
 - File exists? ✗ if missing → suggest `/cc-bot:setup`
-- Field validity (for lark profiles):
+- Field validity（按 `im.type` 分流）:
   - `im.type` in `['lark', 'slack']` — 其他值 → ✗ unsupported adapter
+  - **slack**：`im.bot_user_id` 匹配 `^U[A-Z0-9]+$`、`im.chat_id` 匹配 `^C[A-Z0-9]+$`、`im.extra.bot_token` 以 `xoxb-` 开头、`im.extra.app_token` 以 `xapp-` 开头 —— 缺或不匹配 → ✗；再跑 `node ${CLAUDE_PLUGIN_ROOT}/runtime/slack-send.js check` → `ok:false` → ✗「Slack SDK 未装或 Node 找不到：<missing>」+ `hint`。下面带 `oc_` / `cli_` 字样的检查仅 lark
   - `im.bot_app_id` matches `^cli_[a-z0-9]+$` and **not** `cli_xxxxxxxxxxxx` — ✗ if still placeholder
   - `im.chat_id` starts with `oc_` and length > 20 — ✗ if placeholder
   - `im.chat_ids`（v0.1.51+，可选，多群）：若存在须是数组、每项非空字符串且格式同 `im.chat_id`（lark `oc_` / slack `C`）；类型不对 → ✗；含重复 / 含 `im.chat_id` 本身 → ℹ 运行时已自动去重；非空时报 ℹ「监听 N 个群（主群 `<chat_id>`），polling 每 tick N 次计费调用，NEW_MSG 带 CHAT 标签」。⚠ 若 profile 顶级或 `im` 块里出现 `chat_ids` 以外的多群写法（如 `chat_id` 是数组）→ ✗「多群请用 `im.chat_ids`，`im.chat_id` 必须是单个主群」
@@ -64,7 +65,7 @@ Execute checks in parallel where possible. Collect results, then print one unifi
     - ⚠ 报告「上次 `/cc-bot:start` 启动失败」+ 失败时间（`iso`）+ 原因（`reason`）+ 被占 pid（`blocked_by_pid`）
     - 进一步用 `tasklist //FI "pid eq <blocked_by_pid>"` (Windows) / `ps -p <blocked_by_pid>` (unix) 查该 pid 是否仍活：
       - 已死 → ⚠ 占锁进程已退，残留陈旧 `poll.pid`；建议 `rm .cc-bot/runtime/poll.pid` 后重跑 `/cc-bot:start`
-      - 仍活 → ⚠ 确有另一实例（或 30s 内未自杀的孤儿）；按 `message` 字段指引处理
+      - 仍活 → ⚠ 确有另一实例（或还没到 EPIPE 连续 3 tick 自杀点的孤儿，默认 ≈3min）；按 `message` 字段指引处理
     - 注：成功 `/cc-bot:start` 后此文件由 poll.js acquireLock 自动清除；文件仍在 = 之后没有成功启动过
 - `state.last_processed_time`：若是数字且距今 > 24h 且 `paused=false` → ⚠ 提示 bot 可能长期未收到消息
 - `poll.busy-held`（v0.1.20+，issue #9）：
@@ -119,6 +120,7 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/quota-alert.js status --project <项目根>
 
 - `ok:true` → ℹ 「5h 额度 `<used>`%（阈值 `<warnAt>`/`<urgentAt>`，`<hhmm>` 重置）」；`level` 非 null 时补当前档位
 - `ok:false` → 按 `reason`：`disabled` = ℹ 已关闭；`hud-missing` / `hud-stale` = ⚠ 「HUD 无数据或超 15min 未更新，额度预警静默中」+ 指向 §5 statusline shim 检查；`window-expired` / `no-rate-limits` = ℹ 数据待刷新（跑一次工具调用即可）
+- `ok:true` 且 `reason: 'hud-stale-holding'` → ⚠ 「上窗口已耗尽且 HUD 停更，poll.js 仍按 resets_at 在 hold 群消息」+ 重置时刻
 
 ### 3.8. 主会话假死告警（v0.1.50+，issue #4）
 
@@ -157,9 +159,11 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/quota-alert.js status --project <项目根>
 **4b. 僵尸硬编码版本路径** — 扫 `permissions.allow[]` 内含 `cache/cc-bot/cc-bot/<具体数字版本号>/` 硬编码版本号的规则。对每条命中：
 - 提取规则里嵌的版本号 vs 当前 cc-bot installed version
 - 版本相同 → ℹ 规则匹配当前版本，仍有效（可选择升级为通配以防下次升级再弹）
-- 版本不同 → ⚠ 僵尸规则，列出完整 rule 字符串 + 推荐替换为通配：
+- 版本不同 → ⚠ 僵尸规则，列出完整 rule 字符串 + 推荐替换为 setup §9 的平台通配（整条 `runtime/*.js`，不是单个 poll.js）：
   ```
-  Bash(node */cache/cc-bot/cc-bot/*/runtime/poll.js --project *)
+  macOS:   Bash(node /Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)
+  Linux:   Bash(node /home/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)
+  Windows: Bash(node C:/Users/*/.claude/plugins/cache/cc-bot/cc-bot/*/runtime/*.js *)
   ```
 
 ### 5. Statusline shim (`~/.claude/settings.json`)
@@ -251,7 +255,7 @@ cc-bot doctor — <project.display_name 或 project-root basename>
 <字段校验结果>
 
 ## 运行时
-<Monitor / poll.pid / last-startup-error / state.last_processed_time>
+<Monitor / poll.pid / last-startup-error / state.last_processed_time / busy-held / polling_mode 漂移（§3.5）>
 
 ## poll.js 实例 / 配额（issue #23）
 <跨项目 poll.js 枚举 + 孤儿判定 + 本项目空转 calls/day·month 投影>
@@ -259,11 +263,17 @@ cc-bot doctor — <project.display_name 或 project-root basename>
 ## Claude 额度（v0.1.47+）
 <5h used% + 阈值 + 重置时刻；HUD 不可用时提示预警静默中>
 
+## 假死告警（v0.1.50+）
+<heartbeat.stall_mins 开关 / 无 HUD 心跳提示 / 最近 stall-suspected 记录（§3.8）>
+
 ## 权限扫描
 <零僵尸则 ✓ "未发现硬编码旧版本路径"；否则列出僵尸条目>
 
 ## Statusline
 <shim 注册 / hud-stdin 生成状态>
+
+## Hooks
+<main-busy（§5b）/ todo-bridge（§5c）/ permission-bridge（§5d）注册状态 + 路径版本>
 
 ## lark-cli
 <版本 + auth 状态>

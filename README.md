@@ -163,7 +163,7 @@ Inside Claude Code **in your target project**, run these in order:
 ```
 
 - **lark-cli scope 漂移**（v0.1.22+ 流式卡片要求 `cardkit:card:write` + `cardkit:card:read`）—— 升级 lark-cli 后必须 `lark-cli auth login --scope "cardkit:card:write cardkit:card:read"` 重新拿 token，否则 streaming card 调不动。`/cc-bot:doctor` 会显式检查这两个 scope。
-- **Switching a project to Slack** (v0.1.12+) — install the SDK (`npm i -g @slack/socket-mode @slack/web-api`), then re-run `/cc-bot:setup`; the wizard starts with an IM picker. One project = one IM.
+- **Switching a project to Slack** (v0.1.12+) — install the SDK (`npm i -g @slack/socket-mode @slack/web-api`; cc-bot resolves it from npm's global directory, or `npm install` it inside the plugin folder), set `im.type: "slack"` in `.cc-bot/profiles/active.json` (or delete that file), then re-run `/cc-bot:setup` — the wizard only shows the IM picker when the profile has no `im.type`. One project = one IM.
 
 <br/>
 
@@ -193,12 +193,13 @@ Then `/cc-bot:setup`. Skips marketplace install — loads straight from the loca
 Setup prints a version banner (`cc-bot v<X.Y.Z> setup — <project>`), then runs through these steps — guided by `AskUserQuestion` cards, with IDs auto-detected wherever possible:
 
 0. **Pick IM · 选 IM** — `lark` or `slack`. One project = one IM (switching needs profile rewrite).
-1. **Detect tooling · 检测工具** — lark: auto-install `lark-cli` via `npm i -g @larksuite/cli`. slack: verify `@slack/socket-mode` + `@slack/web-api` (`npm i -g @slack/socket-mode @slack/web-api` if missing).
+1. **Detect tooling · 检测工具** — lark: auto-install `lark-cli` via `npm i -g @larksuite/cli`. slack: `runtime/slack-send.js check` verifies `@slack/socket-mode` + `@slack/web-api` can be loaded (`npm i -g @slack/socket-mode @slack/web-api` if missing — global installs are found automatically).
 2. **Authenticate · 认证** — lark: OAuth Device Flow login (with app-creation checklist). slack: paste `templates/slack-manifest.yaml` into App's "From a manifest" form, then paste `xoxb-` Bot + `xapp-` App-Level tokens (scope `connections:write`).
 3. **Pick target chat · 选目标群** — lark: list bot's chats via `AskUserQuestion` card or one-click create. slack: paste channel ID `C0xxx`; wizard probes + reminds `/invite @cc-bot`.
-4. **Auto-detect IDs · 自动探测** — lark: `bot_app_id` / `admin_open_id` from `lark-cli auth list`. slack: `bot_user_id` from `auth.test`. Zero manual entry.
+4. **Auto-detect IDs · 自动探测** — lark: `bot_app_id` / `admin_open_id` from `lark-cli auth list`. slack: `bot_user_id` from `auth.test`. Zero manual entry. One optional field stays empty: lark `im.bot_open_id` — leave it empty and **any @-mention (including @bot) is ignored** (conservative mode; plain messages still work); to make `@bot` work, have someone mention the bot once and copy `mentions[].id.open_id` from `lark-cli im +chat-messages-list` into the profile (setup prints the exact command).
 5. **Write config · 写配置** — `.cc-bot/profiles/active.json` (IM-branched fields) + `state.json` + `.gitignore`. Locale defaults: `zh-CN` (lark) / `en-US` (slack); override via `im.locale`.
-6. **Register statusline shim · 注册 shim** — tees stdin JSON to `hud-stdin.json` (for bot's HUD intent) + cc-hud rendering if installed.
+6. **Register statusline shim · 注册 shim** — tees stdin JSON to `hud-stdin.json` (for bot's HUD intent, quota alert and stall alert) + cc-hud rendering if installed.
+6b. **Register hooks · 注册 hooks** — merges three hook sets into the global `~/.claude/settings.json` (never overwrites other keys): `UserPromptSubmit` / `Stop` → `main-busy.js` (terminal-first lock), `PreToolUse` → `todo-bridge.js` (todo progress mirrored to the streaming card), `PermissionRequest` → `permission-bridge.js` (permission prompts to the group, inert until `permission_bridge.enabled`). Also asks once whether to enable marketplace `autoUpdate` (default No).
 7. **Register permission set · 注册权限集** (v0.1.38+) — append IM-specific wildcards (`runtime/*.js` · plugin-cache `Read/Edit/Write` · `lark-cli *` · `npm install -g @larksuite/cli*` / `@slack/*` · `curl api.github.com`) to `<project>/.claude/settings.local.json`. **Strictly additive + idempotent** — never overwrites existing rules.
 
 Every step is **idempotent** — rerun safely. Then **`/cc-bot:start`** — bot online in ≤ 5s.
@@ -212,7 +213,7 @@ Main session ── Monitor(persistent) ── node poll.js ── lark: every 6
                                                        lark: `lark-cli event consume` long-connection push + 5min reconcile  (im.transport='push', v0.1.49+)
                                                        slack: Socket Mode WebSocket push (event-driven)
                                                     ├─ dedupe via state.last_processed_time + poll.emitted
-                                                    └─ stdout: NEW_MSG|msg_id|sender|text|ts
+                                                    └─ stdout: NEW_MSG|msg_id|sender|text|ts[|FLAGS=…][|CHAT=<chat_id>]
                                                                ↓ Monitor → notification
                                                          main session → permission.js check → intent.js resolve
                                                                       → dispatch.js register（slot/tags/serial）
@@ -308,7 +309,7 @@ Works for **any project type** — Web / mini-program / Node service / Python da
 
 - **Claude Code** — uses `Skill` / `Monitor` / `TaskStop` / `AskUserQuestion` tools
 - **For lark**: `npm i -g @larksuite/cli` + `lark-cli auth login` (setup wizard will guide this)
-- **For slack**: `npm i -g @slack/socket-mode @slack/web-api` + create an App at api.slack.com/apps via the `templates/slack-manifest.yaml` (setup wizard will guide token paste-in)
+- **For slack**: `npm i -g @slack/socket-mode @slack/web-api` (cc-bot finds global installs; or `npm install` them inside the plugin folder) + create an App at api.slack.com/apps via the `templates/slack-manifest.yaml` (setup wizard will guide token paste-in)
 - **Shell** — **Windows**: Git Bash required (cmd.exe / PowerShell mangle special characters in argv); **macOS / Linux**: system bash works out of the box
 - **Optional: cc-hud** — prettier status bar: `/plugin marketplace add WaterTian/cc-hud` then `/plugin install cc-hud@cc-hud`; cc-bot's statusline shim tees it automatically
 
@@ -330,9 +331,9 @@ Works for **any project type** — Web / mini-program / Node service / Python da
 
 cc-bot ships with **Lark + Slack**. Adding WeCom / DingTalk / Discord / Telegram / etc:
 
-1. Add `adapters/<im>.js` extending `IMAdapter` (see `adapters/base.js`) — implement `listRecentMessages / sendText / sendImage / downloadResource / getUser`; for push-based IMs also implement `startListening / stopListening` (see `adapters/slack.js` for Socket Mode reference)
+1. Add `adapters/<im>.js` extending `IMAdapter` (see `adapters/base.js`) — implement `listRecentMessages / sendText / sendImage / downloadResource / getUser / addReaction`; for push-based IMs also implement `startListening / stopListening` (see `adapters/slack.js` for Socket Mode reference)
 2. Add a branch in `adapters/factory.js` (`createAdapter`) — poll.js and permission-bridge.js both instantiate through it; in `runtime/poll.js` pick `IM_MODE = 'polling'` (HTTP fetch loop) or `'push'` (WebSocket / callback) — push-mode messages **must emit even during mainBusy** (errors are permanent, no retry tick). Every normalized message must carry `chatId`
-3. Set `im.type` in `profile.active.json` to the new IM name; optionally extend `DEFAULT_LOCALE_BY_IM` for system-message i18n
+3. Set `im.type` in `profile.active.json` to the new IM name; optionally extend `DEFAULT_LOCALE_BY_IM` in `adapters/factory.js` (`resolveLocale`) for system-message i18n
 4. Add `skills/<im>-bot/SKILL.md` or extend existing one
 
 <br/>
@@ -350,7 +351,7 @@ One project can serve several groups (issue #24). Keep `im.chat_id` as the **pri
 | Polling | poll.js fetches every group each tick (≈1 billed call per group per tick); one group failing only logs `BOT_WARN|poll.js|poll-chat-failed`, the others keep working |
 | Cursors | **one cursor per group** in `.cc-bot/runtime/poll.cursors.json`, advanced by poll.js on emit. A single global cursor would drop a message from group B that was sent earlier than, but fetched after, a message from group A — exactly the silent loss reported in #24. New groups start from the global `last_processed_time` so history is not replayed |
 | Envelope | every `NEW_MSG` ends with `\|CHAT=<chat_id>`; the main session replies and does its fetch-before-reply check in **that** group. Single-group envelopes are unchanged |
-| Push (`im.transport: "push"` / Slack) | one event stream, filtered by the configured set; events without a chat id are dropped (fail-closed) |
+| Push (`im.transport: "push"` / Slack) | one event stream, filtered by the configured set; lark events without a `chat_id` are dropped (fail-closed) and warned once; a Slack event without `channel` falls back to the primary group |
 | Proactive messages | busy placeholder and stall alert go to the group that triggered them; quota alerts are broadcast to all groups; `/cc-bot:start` / `stop` notify every group; the permission bridge stays on the primary group |
 | Upgrade safety | the array lives in the profile, not in a patched plugin file, so a plugin update can no longer silently turn the second group off; `/cc-bot:doctor` §2 validates the list |
 
@@ -387,7 +388,7 @@ When the main session hits a tool that is not in the allow list, Claude Code sho
 | `notify` | One-way: posts `🔐 需要授权 #ab12 · 工具 · 内容`, the terminal dialog still decides |
 | `approve` | Two-way: an admin (`members.admin_open_ids`) replies `允许 ab12` / `拒绝 ab12` (or `allow` / `deny`) and the hook answers CC; no reply within `wait_secs` → hands back to the terminal (fail-closed). Generic acks (`ok` / `yes` / `1` / `好`) only count when the `#id` is included, so a casual "ok" to a colleague never approves a tool call |
 
-Guard rails: default **off**; only admins are honoured; remote approval is **this call only** (never writes an always-allow rule); every decision is audited in `.cc-bot/runtime/events.log`; the prompt text is redacted before posting (unknown / MCP tools show only whitelisted fields); the admin's reply is consumed by the hook **and** recognised by poll.js itself, so it is never treated as a new task even in push mode. With multiple groups the bridge uses the primary `im.chat_id` only. Dry-run without CC: `node <plugin>/runtime/permission-bridge.js probe --project <root> --mode approve --wait 60`.
+Guard rails: default **off**; only admins are honoured; remote approval is **this call only** (never writes an always-allow rule); every decision is audited in `.cc-bot/runtime/events.log`; the prompt text is redacted before posting (unknown / MCP tools show only whitelisted fields); the admin's reply is consumed by the hook **and** recognised by poll.js itself, so it is never treated as a new task even in push mode. With multiple groups the bridge uses the primary `im.chat_id` only. Live test without CC (it really posts one prompt to the group and waits for a reply): `node <plugin>/runtime/permission-bridge.js probe --project <root> --mode approve --wait 60`.
 
 <br/>
 
@@ -417,7 +418,7 @@ After poll.js hands a group message to the main session it watches three **local
 | 邮箱 / 中国手机号 | `<redacted:email>` / `<redacted:phone_cn>` |
 | `profile.privacy.blocklist` 自定义真名 | `<同事>`（可改 `blocklist_replace`）|
 
-worker 不需要手动调；所有**代码发群路径**（worker 卡片 / 文本、slack-send、权限桥、额度与假死告警）强制脱敏。主会话 inline 用 `lark-cli im +messages-reply` 直接回的短消息由 LLM 按 SKILL 规则自律，不经代码脱敏。
+worker 不需要手动调；所有携带用户内容的**代码发群路径**（worker 卡片 / 文本、slack-send、权限桥摘要）强制脱敏；额度 / 假死告警只发固定模板文案，不含用户内容。主会话 inline 用 `lark-cli im +messages-reply` 直接回的短消息由 LLM 按 SKILL 规则自律，不经代码脱敏。
 
 **② Pre-commit hook（开发本仓库时装）** — 阻塞真实 IM ID / 黑名单真名 / api-secret 进 git commit。一次性 setup 见 CLAUDE.md §Git 提交隐私防护.
 

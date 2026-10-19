@@ -12,6 +12,7 @@
 //   --push        after commit + tag, push main + tag to origin
 //   --release     after push, also create a GitHub Release via `gh release create`
 //                 (implies --push; reads CHANGELOG entry as release notes; needs `gh` CLI)
+//   --npm         after the GitHub release, run `npm publish` (needs `npm login`; failure only prints a hint)
 //   --no-commit   write files only, don't git add / commit / tag
 //
 // Safety:
@@ -70,7 +71,7 @@ function parseArgs() {
     else positional.push(a)
   }
   if (positional.length !== 1) {
-    die('usage: node scripts/release.js <patch|minor|major|X.Y.Z> [--dry] [--push] [--release] [--no-commit]')
+    die('usage: node scripts/release.js <patch|minor|major|X.Y.Z> [--dry] [--push] [--release] [--npm] [--no-commit]')
   }
   return { bump: positional[0], flags }
 }

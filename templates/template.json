@@ -15,7 +15,7 @@
     "transport": "",
     "_transport_comment": "v0.1.49+ 仅 lark：消息传输方式。'' / 'polling'（缺省）= HTTP 轮询，每 tick 1 计费调用；'push' = `lark-cli event consume` 事件长连接（事件不计飞书配额、实时到达），外加 push_reconcile_interval_ms 低频校对轮询兜底静默断流。长连接起不来（另一台机器已占该 app 的事件总线 / 缺 scope / 未登录）或断流不可恢复 → 自动回落 polling，stdout 打 BOT_INFO|push-fallback，服务不中断。⚠ 一个 app 全局只能有一条事件总线：同一 bot app 在多台机器上跑 cc-bot 时只能一台开 push，其余留 polling。",
     "streaming_card": {
-      "_comment": "v0.1.22+ 流式卡片（仅 lark）。enabled=true 时**仅 worker subagent 派工路径走卡片**（worker 派的长任务 = 跨文件改 / 跑测试 / 部署等）；主会话 inline 短回复（查询 / 状态 / typo 修复 / ACK 等）仍走普通 +messages-reply 文本——卡片是【重活在跑】的视觉信号，短消息不出卡避免视觉过重。v0.1.30+ 判据：worker 一次性 --final 内容含换行 = 想排版展示 → 卡片；单行 = 一句话答 → 文本。开启前提：① lark-cli ≥ 1.0.47（cardkit:card:write scope 已注册） + ② 飞书客户端 ≥ 7.20（CardKit v2 流式渲染需求；旧客户端看到「请升级飞书」占位）。",
+      "_comment": "v0.1.22+ 流式卡片（仅 lark）。enabled=true 时**仅 worker subagent 派工路径走卡片**（worker 派的长任务 = 跨文件改 / 跑测试 / 部署等）；主会话 inline 短回复（查询 / 状态 / typo 修复 / ACK 等）仍走普通 +messages-reply 文本——卡片是【重活在跑】的视觉信号，短消息不出卡避免视觉过重。v0.1.30+ 判据：worker 一次性 --final 内容含换行 = 想排版展示 → 卡片；单行 = 一句话答 → 文本（仅在没预热卡时；v0.1.33+ dispatch register 派单时已预热建卡的任务，单行 --final 直接把卡片收口）。开启前提：① lark-cli ≥ 1.0.47（cardkit:card:write scope 已注册） + ② 飞书客户端 ≥ 7.20（CardKit v2 流式渲染需求；旧客户端看到「请升级飞书」占位）。",
       "enabled": false
     },
     "bot_app_id": "cli_xxxxxxxxxxxx",

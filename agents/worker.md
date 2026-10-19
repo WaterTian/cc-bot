@@ -83,7 +83,7 @@ effort: xhigh
 
   - **2m+ 长任务**：≥ 4 次 report（首报 + 至少 2 中段 + finalize），让用户在群里感受到"还在跑"
   - **30s-2m 中任务**：≥ 3 次（首报 + 1 中段 + finalize）
-  - **≤10s 小任务**：可只 1 次 `--final`（一句话单行回也行，CLI 自动走文本 reply）
+  - **≤10s 小任务**：可只 1 次 `--final`（一句话单行也行：未预热卡时 CLI 自动走文本 reply，已预热（dispatch 已建卡）则直接把卡片收口）
 
   - 中途 report 间隔 **≥ 1 秒**（Feishu 50QPS/元素够，但 worker 别频繁刷屏）
   - `--content` 默认 **append**（累加保 typewriter 前缀关系）；要覆写用 `--replace`
@@ -109,11 +109,11 @@ effort: xhigh
 
 - **slack**：
   ```bash
-  node <plugin_root>/runtime/slack-send.js send-text --project <项目根> --text "<结论>"
+  node <plugin_root>/runtime/slack-send.js send-text --project <项目根> --text "<结论>" [--channel <chat_id>]
   ```
-  channel 与 token 由 slack-send.js 自读 `active.json`，**无需传**。
+  token 由 slack-send.js 自读 `active.json`，**无需传**；channel 缺省也是 profile 主群，**只有派单 prompt 带了 `chat_id`（多群 v0.1.51+）才加 `--channel`**，否则结论会发到主群。
 
-派单 prompt 传入的字段：`msg_id`（lark 发群用）/ `plugin_root`（lark + slack 都要用，因为 subagent 运行时 `CLAUDE_PLUGIN_ROOT` 环境变量为空，必须由主会话传入）。`项目根` 两端都用。
+派单 prompt 传入的字段：`msg_id`（lark 发群用）/ `plugin_root`（lark + slack 都要用，因为 subagent 运行时 `CLAUDE_PLUGIN_ROOT` 环境变量为空，必须由主会话传入）/ `chat_id`（可选，slack 多群时主会话传该条消息所在 channel）。`项目根` 两端都用。
 
 ## 安全红线
 

@@ -14,6 +14,8 @@
 //   node runtime/slack-send.js download --project <abs> --file-id <id> --output <path>
 //   node runtime/slack-send.js auth-test --project <abs>
 //   node runtime/slack-send.js user-info --project <abs> --user <U0xxx>
+//   node runtime/slack-send.js check                      # 不需要 profile：SDK 装好没、从哪加载（setup / doctor 用）
+//   send-text / send-image 可加 --channel <C0xxx> 覆盖 profile.im.chat_id（v0.1.51+ 多群：上下线通知逐群、回非主群）
 //
 // 设计决策：所有消息一律发到 channel 主流，**不暴露 thread/reply-to 选项**。
 // 理由：cc-bot 在 Slack 上的人设是"群里的开发同事"，连续主流对话比 thread 体验顺；
@@ -82,7 +84,14 @@ async function main() {
   const argv = process.argv.slice(2)
   const cmd = argv[0]
   if (!cmd) {
-    fail('usage: slack-send.js <send-text|send-image|download|auth-test|user-info> [--args]')
+    fail('usage: slack-send.js <send-text|send-image|download|auth-test|user-info|check> [--args]')
+  }
+  if (cmd === 'check') {
+    // 不读 profile：setup Stage B-slack 跑在 active.json 建好之前
+    const { checkSdks } = require(path.join(__dirname, '..', 'adapters', 'slack'))
+    const r = checkSdks()
+    jsonOut({ ok: r.ok, missing: r.missing, from: r.from, searched: r.searched, hint: r.ok ? undefined : 'npm i -g @slack/socket-mode @slack/web-api（或在 cc-bot 插件目录 npm install 这两个包）后重试' })
+    process.exit(r.ok ? 0 : 1)
   }
   const args = parseArgs(argv.slice(1))
   const projectRoot = path.resolve(args.project || process.env.CC_BOT_PROJECT || '.')

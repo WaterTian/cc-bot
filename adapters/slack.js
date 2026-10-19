@@ -21,20 +21,61 @@
 const fs = require('fs')
 const path = require('path')
 const https = require('https')
+const { execSync } = require('child_process')
 const { IMAdapter } = require('./base')
+
+// SDK 解析（v0.1.52 修）：文档一直让用户 `npm i -g @slack/socket-mode @slack/web-api`，但 Node 的 require 默认
+// **不搜 npm 全局目录**（只搜 node_modules 链 + NODE_PATH），全局装完 adapter 照样 MODULE_NOT_FOUND。
+// 这里按顺序找：本地 node_modules → NODE_PATH → 按 process.execPath 推出的全局目录 → `npm root -g`（最后才 spawn）。
+let _globalRoots = null
+function globalRoots() {
+  if (_globalRoots) return _globalRoots
+  const roots = []
+  if (process.env.NODE_PATH) roots.push(...process.env.NODE_PATH.split(path.delimiter).filter(Boolean))
+  const bin = path.dirname(process.execPath)
+  roots.push(path.join(bin, '..', 'lib', 'node_modules'))  // POSIX / nvm: <prefix>/lib/node_modules
+  roots.push(path.join(bin, 'node_modules'))               // Windows: <prefix>/node_modules
+  try {
+    const r = execSync('npm root -g', { encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim()
+    if (r) roots.push(r)
+  } catch {}
+  _globalRoots = [...new Set(roots.map(r => path.resolve(r)))]
+  return _globalRoots
+}
+
+function resolveSdk(name) {
+  try { return { mod: require(name), from: 'node_modules' } } catch (e) { if (!e || e.code !== 'MODULE_NOT_FOUND') throw e }
+  for (const root of globalRoots()) {
+    const p = path.join(root, name)
+    try { return { mod: require(p), from: p } } catch (e) { if (!e || e.code !== 'MODULE_NOT_FOUND') throw e }
+  }
+  return null
+}
+
+// setup / doctor 用：不需要 profile 就能回答「SDK 装好没、从哪加载的」
+function checkSdks() {
+  const web = resolveSdk('@slack/web-api')
+  const sm = resolveSdk('@slack/socket-mode')
+  return {
+    ok: !!(web && sm),
+    missing: [!web && '@slack/web-api', !sm && '@slack/socket-mode'].filter(Boolean),
+    from: { '@slack/web-api': web && web.from, '@slack/socket-mode': sm && sm.from },
+    searched: ['node_modules', ...globalRoots()],
+  }
+}
 
 // 延迟 require，让没装 SDK 的用户也能 load adapters/lark.js 不报错
 function loadSdks() {
-  try {
-    const { WebClient } = require('@slack/web-api')
-    const { SocketModeClient } = require('@slack/socket-mode')
-    return { WebClient, SocketModeClient }
-  } catch (err) {
+  const web = resolveSdk('@slack/web-api')
+  const sm = resolveSdk('@slack/socket-mode')
+  if (!web || !sm) {
     throw new Error(
-      'SlackAdapter: @slack/web-api / @slack/socket-mode 未安装。' +
-      '在 cc-bot 插件目录跑 `npm install @slack/web-api @slack/socket-mode`'
+      'SlackAdapter: @slack/web-api / @slack/socket-mode 未安装或 Node 找不到（已搜 node_modules / NODE_PATH / npm 全局目录）。' +
+      '装法二选一：① `npm i -g @slack/socket-mode @slack/web-api` ② 在 cc-bot 插件目录 `npm install @slack/web-api @slack/socket-mode`；' +
+      '装完 `node <plugin>/runtime/slack-send.js check` 验证'
     )
   }
+  return { WebClient: web.mod.WebClient, SocketModeClient: sm.mod.SocketModeClient }
 }
 
 function sanitize(s) {
@@ -300,4 +341,4 @@ class SlackAdapter extends IMAdapter {
   }
 }
 
-module.exports = { SlackAdapter }
+module.exports = { SlackAdapter, checkSdks }

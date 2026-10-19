@@ -18,7 +18,7 @@ cc-bot/
 ├── runtime/                    # 所有"决策 / 转换 / 状态管理"代码化的 CLI 工具（SKILL.md 调它们看返回 → 不再 prose 推理）
 │   ├── poll.js                  # 消息主进程（Monitor 托管）— 必须接 --project <abs>；IM_MODE='polling'(lark) / 'push'(slack)；v0.1.51+ 多群 im.chat_ids（逐群拉取 + poll.cursors.json 每群游标 + NEW_MSG CHAT 标签）
 │   ├── slack-send.js            # 跨平台 Slack Web API helper（v0.1.12+ 规避 Win curl GBK 乱码 + token 暴露；v0.1.30+ 自动 redact）
-│   ├── atomic-write.js          # v0.1.36+ 原子写 helper — `.tmp-uuid + fsync + rename + cleanup`；runtime/ 全部 JSON 写点（agents.json / state.json / busy-held / profile / 等 8 处）统一走，防 crash/断电留半截
+│   ├── atomic-write.js          # v0.1.36+ 原子写 helper — `.tmp-uuid + fsync + rename + cleanup`；runtime/ 全部 JSON 状态文件写点（agents.json / state.json / busy-held / profile / cursors / tripwire 等十余处）统一走，防 crash/断电留半截
 │   ├── streaming-card.js        # v0.1.22+ Feishu CardKit v2 流式卡片 driver — worker 调 `report` 统一入口，CLI 内部按 profile + 内容长度自动选 卡片 / 文本 / 降级，自动 redact 自动脱敏；v0.1.36+ state.lastContentHash sha1 dedup 跳过同 content 重复 PUT（todo-bridge 高频同 diff 不再刷屏 + 省 CardKit quota）
 │   ├── streaming-card-policy.js # v0.1.35+ 单一事实源 — `canUseStreamingCard(profile)` 被 streaming-card / dispatch / todo-bridge 共用，去除 3 处 inline `im.type+enabled` 判断漂移
 │   ├── permission.js            # v0.1.23+ 角色 + intent level 判定（admin_open_ids 白名单 + intent_permissions 表 + 高危名字防御），SKILL §权限矩阵 代码化
@@ -49,17 +49,24 @@ cc-bot/
 │   └── doctor.md                # /cc-bot:doctor（v0.1.2+ 健康检查）
 ├── templates/
 │   ├── template.json            # profile 模板，setup 时 copy 到目标项目 .cc-bot/profiles/（含 im.locale + _slack_example）
-│   └── slack-manifest.yaml      # Slack App manifest 模板（v0.1.12+，9 scopes + Socket Mode + 3 event_subscriptions）
+│   └── slack-manifest.yaml      # Slack App manifest 模板（v0.1.12+，10 bot scopes + Socket Mode + 3 event_subscriptions）
 ├── .claude/
 │   ├── settings.json            # 开发本仓库用的 permission / MCP 开关（进库）
 │   └── settings.local.json      # 本机覆盖，含绝对路径（gitignore）
+├── scripts/
+│   ├── release.js               # 一键发版（bump 版本 / CHANGELOG / commit / tag / push / gh release / --npm）
+│   ├── pre-commit-scan.sh       # 提交隐私扫描（真实飞书 ID / 黑名单真名 / secret）；core.hooksPath=scripts/hooks 启用
+│   └── blocklist.txt.example    # 本地真名黑名单模板（复制为 blocklist.txt，gitignore）
+├── assets/logo.png              # README 顶图
+├── CHANGELOG.md                 # release.js 维护
+├── LICENSE                      # MIT
 ├── CLAUDE.md                    # 本文件
 └── README.md                    # 对外分发文档
 ```
 
 ## 架构要点
 
-- **IMAdapter 抽象**：`adapters/base.js` 定义接口（`listRecentMessages` / `sendText` / `sendImage` / `downloadResource` / `getUser`，以及 push 模式扩展的 `startListening` / `stopListening`）。已有实现：`adapters/lark.js`（polling）+ `adapters/slack.js`（push，v0.1.12+）。扩展新 IM 时新增 adapter 文件 + `adapters/factory.js` 的分支 + profile `im.type` 即可（poll.js 与 permission-bridge 都经 factory 实例化）。
+- **IMAdapter 抽象**：`adapters/base.js` 定义接口（`listRecentMessages` / `sendText` / `sendImage` / `downloadResource` / `getUser` / `addReaction`，以及 push 模式扩展的 `startListening` / `stopListening`）。已有实现：`adapters/lark.js`（polling）+ `adapters/slack.js`（push，v0.1.12+）。扩展新 IM 时新增 adapter 文件 + `adapters/factory.js` 的分支 + profile `im.type` 即可（poll.js 与 permission-bridge 都经 factory 实例化）。
 - **两种工作模式**：`IM_MODE = 'polling'`（lark 默认：HTTP 60s tick 拉 `listRecentMessages`，mainBusy 时不 emit 等下 tick 重 fetch）/ `'push'`（slack：Socket Mode WebSocket 推送；lark v0.1.49+ `im.transport='push'` opt-in：`lark-cli event consume` 事件长连接，不计飞书配额，外加 `push_reconcile_interval_ms` 5min 校对轮询兜底静默断流，长连接不可用自动回落 polling）。push 模式 mainBusy 时**仍必须 emit**，错过永久丢失，与 polling 是根本不同原则。详见 memory `feedback_push_mode_mainbusy`。⚠ 一个 bot app 全局只能一条事件总线，多机共用同一 app 时只能一台开 push。
 - **IM 无关定位**：cc-bot 是 IM 无关的 Claude Code 群 bot 插件，目前已实现 lark + slack；见 memory `feedback_im_agnostic_design`。
 - **i18n**：`profile.im.locale` 缺省按 IM 类型决（lark=zh-CN / slack=en-US），覆盖 BUSY 占位 / 上下线通知 / HUD 行；详见 memory `feedback_im_i18n_default`。
@@ -117,7 +124,7 @@ cp scripts/blocklist.txt.example scripts/blocklist.txt
 # 编辑 scripts/blocklist.txt 一行一个真名
 ```
 
-扫描规则：飞书真实 ID (`cli_/ou_/oc_/om_` + 14 位以上 hex) + blocklist 子串 + `app_secret/api_key/bearer token` 正则。命中即 `exit 1`。确需绕过用 `git commit --no-verify`（谨慎）。
+扫描规则：飞书真实 ID (`cli_/ou_/oc_/om_/on_` + 14 位以上字母数字，全 x 占位放行，与 runtime/redact.js 对齐) + blocklist 子串 + `app_secret/api_key/bearer token` 正则。命中即 `exit 1`。确需绕过用 `git commit --no-verify`（谨慎）。
 
 ## 发版流程（维护者）
 
@@ -140,7 +147,7 @@ node scripts/release.js 0.2.0              # 指定具体版本号
 
 preflight 校验：必须在 main 分支、工作区干净、目标 tag 不存在。
 
-发版顺序：① 业务/功能性 commit 先做完、全部推上 main → ② `node scripts/release.js <bump> --release --npm` 一把梭（含 npm publish；没登录 npm 就去掉 `--npm`，事后手工 `npm publish`）→ ③ 使用 cc-bot 的项目按 README §Updating 跑 3 条命令拉新版。
+发版顺序：① 业务/功能性 commit 先做完、全部推上 main → ② `node scripts/release.js <bump> --release --npm` 一把梭（含 npm publish；没登录 npm 就去掉 `--npm`，事后手工 `npm publish`）→ ③ 使用 cc-bot 的项目按 README §Updating 逐条跑升级命令（stop → marketplace update → plugin update → reload-plugins → start）拉新版。
 
 **npm**：包名 `cc-bot`（无 scope），账号 watertian，2026-10-19 起随版本发布；`package.json.files` 白名单限定内容（runtime / adapters / commands / skills / agents / templates / assets / .claude-plugin / README / CHANGELOG / LICENSE），发前 `npm pack --dry-run` 可核对。插件安装仍走 marketplace，npm 只是镜像 + 占名，不提供 `npm i -g` 式安装。
 
@@ -148,7 +155,7 @@ preflight 校验：必须在 main 分支、工作区干净、目标 tag 不存�
 
 - Claude Code 已安装
 - **For lark**：`lark-cli` 已全局安装并完成 `auth login`（bot + user 身份）
-- **For slack**（v0.1.12+）：`npm i -g @slack/socket-mode @slack/web-api` 全局装；按 `templates/slack-manifest.yaml` 在 api.slack.com/apps 建 App + 拿 `xoxb-` Bot Token + `xapp-` App-Level Token（scope `connections:write`）
+- **For slack**（v0.1.12+）：`npm i -g @slack/socket-mode @slack/web-api` 全局装（v0.1.52+ adapter 会自动到 npm 全局目录 / NODE_PATH 找；也可在插件目录 `npm install` 这两个包）；`node runtime/slack-send.js check` 验证；按 `templates/slack-manifest.yaml` 在 api.slack.com/apps 建 App + 拿 `xoxb-` Bot Token + `xapp-` App-Level Token（scope `connections:write`）
 - Shell：**Windows** 用 Git Bash（adapter 底层借 bash shell 传 argv；不能用 PowerShell/cmd）；**macOS/Linux** 系统自带 bash 即可（无须额外配置）
 - 按 profile.intents 需要，安装对应 MCP（如 wechat-devtools / chrome-devtools 等，视项目定）
 

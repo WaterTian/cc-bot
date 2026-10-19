@@ -1,4 +1,5 @@
-// cc-bot 原子写入 helper —— 单一调用入口，让 runtime/ 不再有裸 fs.writeFileSync。
+// cc-bot 原子写入 helper —— 单一调用入口，runtime/ 的 JSON 状态文件写点统一走这里
+// （pid / poll.emitted / notified.flag 这类非 JSON 单行文件和 statusline 的 HUD 落盘仍直写，半截无害或在状态栏关键路径上）。
 //
 // 流程：同目录 `.tmp-<base>-<uuid>` → write → fsync → rename → 失败 cleanup。
 // POSIX rename 同目录原子保证，避免 crash/断电留半截 JSON 让 readJSON catch 静默
