@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.50] - 2026-10-19
+
+- feat: 主会话假死主动告警 stall-alert — emit 后无动静即发群 + 终端 BOT_WARN (#4)
+
 ## [0.1.49] - 2026-10-19
 
 - feat: lark 事件推送传输（opt-in）+ 权限弹窗转群 permission-bridge (#23 #10 #17)
