@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.49] - 2026-10-19
+
+- feat: lark 事件推送传输（opt-in）+ 权限弹窗转群 permission-bridge (#23 #10 #17)
+
 ## [0.1.48] - 2026-07-28
 
 - docs: README 补 v0.1.47 额度预警 + 修正过期的 10s 默认轮询间隔
