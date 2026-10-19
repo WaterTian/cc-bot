@@ -624,7 +624,7 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
         }
       }
       ```
-      报告：`✓ autoUpdate 已开启（CC 启动时自动拉最新 cc-bot）。要关：编辑 ~/.claude/settings.json 把 extraKnownMarketplaces.cc-bot.autoUpdate 改为 false`
+      报告：`✓ autoUpdate 已开启（每次会话发出第一条消息后 10 分钟内 CC 自动拉最新 cc-bot，提示 Run /reload-plugins to apply）。要关：编辑 ~/.claude/settings.json 把 extraKnownMarketplaces.cc-bot.autoUpdate 改为 false`
 
       **No 路径**（**记录 false 而非啥都不写** — 防下次 setup 又弹问）：
       ```json

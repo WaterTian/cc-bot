@@ -147,7 +147,7 @@ node scripts/release.js 0.2.0              # 指定具体版本号
 
 preflight 校验：必须在 main 分支、工作区干净、目标 tag 不存在。
 
-发版顺序：① 业务/功能性 commit 先做完、全部推上 main → ② `node scripts/release.js <bump> --release --npm` 一把梭（含 npm publish；没登录 npm 就去掉 `--npm`，事后手工 `npm publish`）→ ③ 使用 cc-bot 的项目按 README §Updating 逐条跑升级命令（stop → marketplace update → plugin update → reload-plugins → start）拉新版。
+发版顺序：① 业务/功能性 commit 先做完、全部推上 main → ② `node scripts/release.js <bump> --release --npm` 一把梭（含 npm publish；没登录 npm 就去掉 `--npm`，事后手工 `npm publish`）→ ③ 使用 cc-bot 的项目按 README §Updating 逐条跑升级命令（stop → `/plugin marketplace update cc-bot`（面板里连带更新插件；没有 `/plugin update` 斜杠命令）→ reload-plugins → start）拉新版。
 
 **npm**：包名 `cc-bot`（无 scope），账号 watertian，2026-10-19 起随版本发布；`package.json.files` 白名单限定内容（runtime / adapters / commands / skills / agents / templates / assets / .claude-plugin / README / CHANGELOG / LICENSE），发前 `npm pack --dry-run` 可核对。插件安装仍走 marketplace，npm 只是镜像 + 占名，不提供 `npm i -g` 式安装。
 

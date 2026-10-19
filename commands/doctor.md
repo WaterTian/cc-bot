@@ -20,10 +20,9 @@ Execute checks in parallel where possible. Collect results, then print one unifi
   - `project` scope for current project but `version` < `user` scope version → ⚠ stale project pin
 - **Latest release on GitHub** (best-effort, 3s timeout): `curl -sfL --max-time 3 https://api.github.com/repos/WaterTian/cc-bot/releases/latest | grep '"tag_name"' | head -1`
   - If latest > installed → ⚠ 提示升级：**逐条**执行（CC 的 `/plugin ...` 是交互面板，不支持 shell `&&` 串联）：
-    1. `/plugin marketplace update cc-bot`（看到新版关闭面板）
-    2. `/plugin update cc-bot@cc-bot`（同样可能开面板）
-    3. `/reload-plugins`
-    4. `/cc-bot:start`（v0.1.40+ self-heal 取代手工 setup + doctor）
+    1. `/plugin marketplace update cc-bot`（打开面板并刷新 marketplace，从它装的插件一并更新；看到新版关闭面板）—— 没有 `/plugin update` 斜杠命令，面板里仍是旧版就点 Installed 页的 **Update now**，或终端 `claude plugin update cc-bot@cc-bot` 后重启 CC
+    2. `/reload-plugins`
+    3. `/cc-bot:start`（v0.1.40+ self-heal 取代手工 setup + doctor）
 
     或直接重启 CC：若已开 autoUpdate（README §Updating > [!TIP]），`/exit` + shell `claude` 自动拉新版，进会话 `/cc-bot:start` 即可
   - curl 失败 / 无 release → ℹ 跳过
