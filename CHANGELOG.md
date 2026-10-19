@@ -4,6 +4,10 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.51] - 2026-10-19
+
+- feat: 原生多群监听 im.chat_ids — 每群独立游标 + NEW_MSG CHAT 标签 (#24) + 审计修复一批
+
 ## [0.1.50] - 2026-10-19
 
 - feat: 主会话假死主动告警 stall-alert — emit 后无动静即发群 + 终端 BOT_WARN (#4)
