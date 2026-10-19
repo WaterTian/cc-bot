@@ -11,9 +11,15 @@
 //
 // Profile：<project>/.cc-bot/profiles/active.json
 //   {
-//     "im": { "type": "lark", "bot_app_id": "...", "chat_id": "..." },
-//     "polling_interval_ms": 60000   // 可选（默认 60000 ms = 60s，v0.1.46+ 从 10s 调回 60s 省租户配额，issue #23）
+//     "im": { "type": "lark", "bot_app_id": "...", "chat_id": "...", "transport": "" },
+//     "polling_interval_ms": 60000,        // 可选（默认 60000 ms = 60s，v0.1.46+ 从 10s 调回 60s 省租户配额，issue #23）
+//     "push_reconcile_interval_ms": 300000 // 可选（仅 im.transport='push' 时生效：校对轮询间隔，默认 5min）
 //   }
+//
+// 传输模式（v0.1.49+，issue #23 Phase 3）：
+//   lark 默认 HTTP polling；profile.im.transport='push' 显式 opt-in 走 `lark-cli event consume` 事件长连接
+//   （事件不计飞书配额、实时到达），外加低频「校对轮询」兜底静默断流；长连接起不来 / 不可恢复 →
+//   自动回落 polling（BOT_INFO|push-fallback），不中断服务。slack 固定 Socket Mode push。
 //
 // 三层防御（2026-04-20 polling 架构三坑对策，不可删除）：
 //   ① PID lockfile 单例锁 — 启动旧进程活则落 last-startup-error.json + exit 0；每 tick 校验 pid 文件仍是自己
@@ -32,6 +38,7 @@ const { atomicWriteSync } = require('./atomic-write')
 const dispatchModule = require('./dispatch')
 const botSwitchDetect = require('./bot-switch-detect')
 const quotaAlert = require('./quota-alert')
+const { createAdapter } = require('../adapters/factory')
 
 // ========== 参数解析 ==========
 
@@ -72,34 +79,14 @@ if (!profile || !profile.im || !profile.im.type) {
 }
 
 const im = profile.im
-const IM_MODE = im.type === 'slack' ? 'push' : 'polling'  // slack = Socket Mode push；lark = polling
+// lark 默认 polling；im.transport='push' 显式 opt-in 事件长连接（v0.1.49+）。slack 固定 Socket Mode push。
+const LARK_PUSH_OPTIN = im.type === 'lark' && String(im.transport || '').trim().toLowerCase() === 'push'
+let IM_MODE = im.type === 'slack' ? 'push' : (LARK_PUSH_OPTIN ? 'push' : 'polling')  // 运行中可能回落为 polling
 let adapter
 try {
-  if (im.type === 'lark') {
-    if (!im.bot_app_id || !im.chat_id) {
-      console.log(`BOT_ERROR|poll.js|profile-invalid|lark 需要 im.bot_app_id 和 im.chat_id`)
-      process.exit(1)
-    }
-    const { LarkAdapter } = require(path.join(__dirname, '..', 'adapters', 'lark'))
-    adapter = new LarkAdapter({ botAppId: im.bot_app_id })
-  } else if (im.type === 'slack') {
-    const extra = im.extra || {}
-    if (!extra.bot_token || !extra.app_token || !im.bot_user_id || !im.chat_id) {
-      console.log(`BOT_ERROR|poll.js|profile-invalid|slack 需要 im.extra.bot_token / im.extra.app_token / im.bot_user_id / im.chat_id`)
-      process.exit(1)
-    }
-    const { SlackAdapter } = require(path.join(__dirname, '..', 'adapters', 'slack'))
-    adapter = new SlackAdapter({
-      botToken: extra.bot_token,
-      appToken: extra.app_token,
-      botUserId: im.bot_user_id,
-    })
-  } else {
-    console.log(`BOT_ERROR|poll.js|unsupported-im|im.type=${im.type} 暂不支持`)
-    process.exit(1)
-  }
+  adapter = createAdapter(profile)   // adapters/factory.js：字段校验 + 按 im.type 实例化（与 permission-bridge 共用）
 } catch (err) {
-  console.log(`BOT_ERROR|poll.js|adapter-init|${err.message}`)
+  console.log(`BOT_ERROR|poll.js|${err.code || 'adapter-init'}|${err.message}`)
   process.exit(1)
 }
 
@@ -113,6 +100,12 @@ const LOCALE = im.locale || DEFAULT_LOCALE_BY_IM[im.type] || 'zh-CN'
 // 默认 60s（v0.1.46+，issue #23）：飞书基础版租户级共享 1M 调用/月，10s 空转（经记忆化 1 计费/tick）
 // ≈259k/月单 bot 就吃掉 1/4 租户配额；60s 降到 ≈43k/月。profile 显式设 polling_interval_ms 覆盖此默认。
 const CHECK_INTERVAL_MS = Number(profile.polling_interval_ms) || 60 * 1000
+// lark push 模式的校对轮询间隔：事件流在代理 / 弱网下可能静默断流（历史坑），低频拉一次兜底，
+// 每 tick 1 计费调用；默认 5min ≈ 288 calls/day（polling@60s 的 1/5）。profile.push_reconcile_interval_ms 覆盖。
+const RECONCILE_INTERVAL_MS = Number(profile.push_reconcile_interval_ms) || 5 * 60 * 1000
+let tickIntervalMs = CHECK_INTERVAL_MS   // 当前 tick 间隔：polling=CHECK_INTERVAL_MS / lark push=RECONCILE_INTERVAL_MS
+let tickTimer = null
+let tickLoopStarted = false
 const PAGE_SIZE = 10
 // hold 期间（主会话忙 / 额度耗尽）拉更多条：hold 解除后要靠这一页把积压的消息补出来，
 // 页太小时长 hold（额度耗尽可达数小时）里较早的消息会滚出拉取窗口永久丢。
@@ -664,7 +657,8 @@ async function tick() {
   pruneBusyHeld()
   const { busy: mainBusy, degraded, lockTs } = checkMainBusy()
   // 额度耗尽与主会话忙碌走同一条 hold 路径：不 emit、进 busy-held、恢复后补推
-  const { hold: quotaHold } = await checkQuotaAndNotify()
+  // hold 能力只有纯 polling 才有（下一 tick 能重 fetch）；push 模式推来的消息不 emit 即永久丢
+  const { hold: quotaHold } = await checkQuotaAndNotify({ holdCapable: IM_MODE === 'polling' })
   const holdMsgs = mainBusy || quotaHold
 
   const msgs = await pollMessages(holdMsgs ? HOLD_PAGE_SIZE : PAGE_SIZE)
@@ -692,7 +686,12 @@ async function tick() {
 
   for (const m of asc) {
     if (!m.id) { reasons.id++; continue }
-    if (emitted.has(m.id)) { reasons.emitted++; continue }
+    if (emitted.has(m.id)) {
+      reasons.emitted++
+      // 已被别的路径消费（push 先到 / permission-bridge 吃掉管理员回复）→ 不必再 hold
+      if (busyHeld.has(m.id)) { busyHeld.delete(m.id); busyHeldDirty = true }
+      continue
+    }
     if (m.senderType === 'bot') { reasons.bot++; continue }
     if (!VALID_TYPES.has(m.type)) { reasons.type++; continue }
 
@@ -775,7 +774,21 @@ async function pollOnce() {
 const ONCE_MODE = process.argv.includes('--once')  // self-poll：跑一次输出后退出
 
 function scheduleTick() {
-  tick().finally(() => setTimeout(scheduleTick, CHECK_INTERVAL_MS))
+  tickLoopStarted = true
+  tick().finally(() => { tickTimer = setTimeout(scheduleTick, tickIntervalMs) })
+}
+
+// lark push → polling 回落（启动失败 / 断流不可恢复）。幂等；回落后本进程生命周期内不再尝试 push。
+function fallbackToPolling(reason) {
+  if (IM_MODE === 'polling') return
+  IM_MODE = 'polling'
+  tickIntervalMs = CHECK_INTERVAL_MS
+  try { if (typeof adapter.stopListeningSync === 'function') adapter.stopListeningSync() } catch {}
+  const why = String(reason || '').replace(/[\r\n]+/g, ' ').slice(0, 400)
+  logEvent(`BOT_WARN|poll.js|push-fallback-polling|${why}`)
+  console.log(`BOT_INFO|poll.js|push-fallback|lark 事件长连接不可用，已回落 HTTP polling @ ${Math.round(CHECK_INTERVAL_MS / 1000)}s（${why}）`)
+  if (tickTimer) clearTimeout(tickTimer)
+  tickTimer = setTimeout(scheduleTick, 1000)
 }
 
 // Push 模式（slack）：单条到达，复用 tick 内部的过滤/emit 逻辑
@@ -803,7 +816,8 @@ async function handlePushMessage(m) {
   }
 
   if (mainBusy) {
-    // push 模式必须立刻 emit — 没有"下一 tick 重新 fetch"机制，错过 push 永久丢失。
+    // push 模式必须立刻 emit — 没有"下一 tick 重新 fetch"机制，错过 push 永久丢失
+    // （lark push 虽有校对轮询，但间隔 5min 且只是兜底，不拿它当主路径）。
     // 主会话忙时 CC 会自动把 notification 排队，忙完按顺序处理 → 消息不丢 + 不打断主会话节奏。
     // busy 占位由 sendMainBusyPlaceholder 内部做 per-lock + 全局节流去重，不会刷屏。
     emitNewMsg(m)
@@ -828,12 +842,23 @@ async function startPushMode() {
         })
       },
       onError: (err) => {
-        console.log(`BOT_ERROR|poll.js|push-stream|${err && err.message || String(err)}`)
+        const msg = (err && err.message) || String(err)
+        // lark push：adapter 自己退避重连；fatal（环境不满足 / 重连耗尽）才回落 polling
+        if (LARK_PUSH_OPTIN && err && err.fatal) { fallbackToPolling(msg); return }
+        if (err && err.transient) { logEvent(`BOT_WARN|poll.js|push-stream-transient|${msg}`); return }
+        console.log(`BOT_ERROR|poll.js|push-stream|${msg}`)
       },
     })
     console.log(`BOT_INFO|poll.js|push-listening|${im.type}|${CHAT_ID}`)
+    if (LARK_PUSH_OPTIN) {
+      // 校对轮询：低频 tick 复用 polling 全套过滤 / 去重 / 额度检查，补事件流漏掉的消息
+      tickIntervalMs = RECONCILE_INTERVAL_MS
+      if (!tickLoopStarted) { tickLoopStarted = true; tickTimer = setTimeout(scheduleTick, RECONCILE_INTERVAL_MS) }
+    }
   } catch (err) {
-    console.log(`BOT_ERROR|poll.js|push-start|${err.message}`)
+    const msg = (err && err.message) || String(err)
+    if (LARK_PUSH_OPTIN) { fallbackToPolling(msg); return }
+    console.log(`BOT_ERROR|poll.js|push-start|${msg}`)
     process.exit(1)
   }
 }
@@ -848,9 +873,11 @@ if (ONCE_MODE) {
   acquireLock()
   loadBusyHeld()  // v0.1.20：恢复上次未 emit 的 held 消息（issue #9）
   loadReacted()   // v0.1.21：恢复上次已打 reaction 的 msg id 集合（issue #12，防重打）
-  process.on('exit', releaseLock)
-  process.on('SIGINT', () => { releaseLock(); process.exit(0) })
-  process.on('SIGTERM', () => { releaseLock(); process.exit(0) })
+  // 退出前顺手关事件长连接子进程（lark push）：关 stdin = lark-cli 的优雅退出信号，走退订不留孤儿
+  const shutdownAdapter = () => { try { if (typeof adapter.stopListeningSync === 'function') adapter.stopListeningSync() } catch {} }
+  process.on('exit', () => { shutdownAdapter(); releaseLock() })
+  process.on('SIGINT', () => { shutdownAdapter(); releaseLock(); process.exit(0) })
+  process.on('SIGTERM', () => { shutdownAdapter(); releaseLock(); process.exit(0) })
   process.on('uncaughtException', () => {})
   process.on('unhandledRejection', () => {})
   // issue #23：启动打印配额成本预测，让 polling 的租户 API 消耗前置可见。
@@ -859,16 +886,21 @@ if (ONCE_MODE) {
   if (IM_MODE === 'polling') {
     const ticksPerDay = Math.round((86400 * 1000) / CHECK_INTERVAL_MS)
     console.log(`BOT_INFO|poll.js|quota-projection|${im.type} polling @ ${Math.round(CHECK_INTERVAL_MS / 1000)}s：空转≈${ticksPerDay} calls/day ≈${Math.round(ticksPerDay * 30 / 1000)}k/month（租户级共享配额；活跃遇新消息 tick +1）`)
+  } else if (LARK_PUSH_OPTIN) {
+    const reconcilesPerDay = Math.round((86400 * 1000) / RECONCILE_INTERVAL_MS)
+    console.log(`BOT_INFO|poll.js|quota-projection|lark push（事件长连接，不计配额）+ 校对轮询 @ ${Math.round(RECONCILE_INTERVAL_MS / 1000)}s：空转≈${reconcilesPerDay} calls/day；长连接不可用自动回落 polling @ ${Math.round(CHECK_INTERVAL_MS / 1000)}s`)
   }
   if (IM_MODE === 'push') {
     setTimeout(startPushMode, 1000)
-    // push 模式是事件驱动、没有 tick 循环，额度检查单挂低频定时器。
-    // holdCapable=false：Socket Mode 推来的消息不 emit 就永久丢，没有「下一 tick 重 fetch」兜底，
-    // 所以耗尽期仍照常 emit（CC 会把 notification 排队），只是话术改成「恢复后麻烦重发」。
-    setInterval(() => {
-      checkQuotaAndNotify({ holdCapable: false }).catch(() => {})
-    }, QUOTA_CHECK_INTERVAL_MS)
+    if (!LARK_PUSH_OPTIN) {
+      // slack push 没有 tick 循环，额度检查单挂低频定时器（lark push 由校对 tick 顺带做）。
+      // holdCapable=false：Socket Mode 推来的消息不 emit 就永久丢，没有「下一 tick 重 fetch」兜底，
+      // 所以耗尽期仍照常 emit（CC 会把 notification 排队），只是话术改成「恢复后麻烦重发」。
+      setInterval(() => {
+        checkQuotaAndNotify({ holdCapable: false }).catch(() => {})
+      }, QUOTA_CHECK_INTERVAL_MS)
+    }
   } else {
-    setTimeout(scheduleTick, 1000)
+    tickTimer = setTimeout(scheduleTick, 1000)
   }
 }

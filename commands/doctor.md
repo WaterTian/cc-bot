@@ -98,6 +98,9 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 - 对每条提取 `--project <path>`：
   - path === 当前项目 → ✓ 本项目实例（正常）
   - path !== 当前项目 → ℹ 「另一项目 `<path>` 的 poll.js 在跑（pid <N>）」+ 进一步判该 path 是否仍存在：目录已删 / profile 缺失 → ⚠ 「疑似**孤儿**：项目 `<path>` 已不存在但 poll.js 仍在烧配额，建议 `kill <pid>` + 清其 `poll.pid`」
+- **传输模式行（lark，v0.1.49+）**：读 `profile.im.transport`：
+  - `push` → ℹ 「lark push：事件长连接（不计配额）+ 校对轮询 @ `<push_reconcile_interval_ms/1000>`s ≈ `<86400000/interval>` calls/day」；再跑 `LARK_CLI_NO_PROXY=1 lark-cli event status --json` 看本机事件总线：`running=true` → ✓ 事件流在线；`not_running` 且本项目 poll.js 在跑 → ⚠ 「事件流未建立，poll.js 可能已回落 polling —— 看 `events.log` 最近的 `push-fallback-polling` 行取原因（常见：另一台机器占着该 app 的事件总线 / lark-cli 缺 scope）」
+  - 其它值 → 走下面配额成本行（polling）
 - **配额成本行（本项目，仅 lark polling）**：读 `profile.polling_interval_ms`（缺省 60000，v0.1.46+）+ `im.type`，算空转投影：
   - `ticksPerDay = round(86400000 / interval_ms)`；`calls/day ≈ ticksPerDay`（记忆化后空转 1 计费/tick）；`calls/month ≈ ticksPerDay × 30`
   - ℹ 「本项目 lark polling @ `<interval_s>`s：空转≈`<calls/day>`/day ≈`<k/month>`k/month（活跃遇新消息 tick +1 raw 调用）」
@@ -186,6 +189,19 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/quota-alert.js status --project <项目根>
 - 存在且路径与当前版本对齐 → ✓ 主会话 TodoWrite 自动 mirror 到流式卡片
 - 存在但路径过期（指向旧 cache 版本号或本地开发仓）→ ⚠ 建议重跑 `/cc-bot:setup`（step 8.5 会刷新路径）
 - 不存在 → ℹ 未注册（worker 派工进度仅靠 worker 自报 `streaming-card.js report`，丢主会话 TodoWrite 这条 mirror 通道）→ 建议重跑 `/cc-bot:setup`（step 8.5 会幂等注册）
+
+### 5d. Permission-bridge hook (`~/.claude/settings.json`, v0.1.49+)
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/runtime/permission-bridge.js status --project <项目根>
+```
+
+→ `{enabled, mode, wait_secs, admins, hook_registered, pending}`，按返回报：
+- `enabled=false` → ℹ 「权限桥未开启（主会话权限弹窗不转群）。开法：profile `permission_bridge.enabled=true`，`mode` 选 `notify` / `approve`」
+- `enabled=true` 且 `hook_registered=false` → ⚠ 「已开启但 hook 未注册 → 跑 `/cc-bot:start`（§0b 会自愈注册）或重跑 `/cc-bot:setup`」
+- `enabled=true` 且 `mode=approve` 且 `admins=0` → ⚠ 「approve 需要 `members.admin_open_ids`，运行时会自动降级 notify」
+- `enabled=true` 其余 → ✓ 「权限桥 `<mode>`（等待 `<wait_secs>`s，`<admins>` 位管理员可代答）」
+- `pending` 非空 → ℹ 「当前 N 条待确认：#id …」
 
 ### 6. lark-cli
 

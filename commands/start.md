@@ -34,7 +34,13 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/bot-switch-detect.js gate --project <project.
       - 写回前 diff，若 append 数 `N > 0` → 报 `ℹ self-heal: 补全 N 条权限通配`
       - JSON parse 失败 / write 失败 → 报 `⚠ 权限 self-heal 失败：<msg>，继续启动`，**不中断 start**
 
-   c. 两步都是 quick fs ops，~100ms 内完成；若都无补 → 不报（保持 start 简洁视觉）
+   c. **permission-bridge hook 自愈**（v0.1.49+，**仅当** profile `permission_bridge.enabled === true`；未开启不碰全局 settings）：
+      - Read `~/.claude/settings.json`，查 `hooks.PermissionRequest[]` 任一 `.hooks[].command` 是否含 `permission-bridge.js`
+      - 缺 → 按 setup §8.7 的目标配置 append（幂等纯加法），报 `ℹ self-heal: 已注册 permission-bridge hook（权限弹窗将转发到群，mode=<notify|approve>）`
+      - 已有 → 静默；JSON parse / write 失败 → 报 `⚠ permission-bridge hook 自愈失败：<msg>，继续启动`，**不中断 start**
+      - 顺带：`mode === 'approve'` 且 `members.admin_open_ids` 为空 → 报一行 `⚠ permission_bridge.mode=approve 但 admin_open_ids 为空，运行时将降级为 notify`
+
+   d. 三步都是 quick fs ops，~100ms 内完成；若都无补 → 不报（保持 start 简洁视觉）
 
 1. **并行 Read**：
    - `.cc-bot/profiles/active.json`（拿 `im.chat_id`、`im.bot_app_id`、`project.root`、`paths.bot_temp_abs`、`polling_mode`、`self_poll_interval`）

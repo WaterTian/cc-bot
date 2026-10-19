@@ -12,6 +12,8 @@
     "busy_placeholder": true,
     "busy_reaction": "",
     "debug": false,
+    "transport": "",
+    "_transport_comment": "v0.1.49+ 仅 lark：消息传输方式。'' / 'polling'（缺省）= HTTP 轮询，每 tick 1 计费调用；'push' = `lark-cli event consume` 事件长连接（事件不计飞书配额、实时到达），外加 push_reconcile_interval_ms 低频校对轮询兜底静默断流。长连接起不来（另一台机器已占该 app 的事件总线 / 缺 scope / 未登录）或断流不可恢复 → 自动回落 polling，stdout 打 BOT_INFO|push-fallback，服务不中断。⚠ 一个 app 全局只能有一条事件总线：同一 bot app 在多台机器上跑 cc-bot 时只能一台开 push，其余留 polling。",
     "streaming_card": {
       "_comment": "v0.1.22+ 流式卡片（仅 lark）。enabled=true 时**仅 worker subagent 派工路径走卡片**（worker 派的长任务 = 跨文件改 / 跑测试 / 部署等）；主会话 inline 短回复（查询 / 状态 / typo 修复 / ACK 等）仍走普通 +messages-reply 文本——卡片是【重活在跑】的视觉信号，短消息不出卡避免视觉过重。v0.1.30+ 判据：worker 一次性 --final 内容含换行 = 想排版展示 → 卡片；单行 = 一句话答 → 文本。开启前提：① lark-cli ≥ 1.0.47（cardkit:card:write scope 已注册） + ② 飞书客户端 ≥ 7.20（CardKit v2 流式渲染需求；旧客户端看到「请升级飞书」占位）。",
       "enabled": false
@@ -87,8 +89,17 @@
     "hold_messages_when_exhausted": true
   },
 
+  "permission_bridge": {
+    "_comment": "v0.1.49+ 权限桥（runtime/permission-bridge.js，CC PermissionRequest hook）。主会话弹「允许 / 拒绝」权限框时转发到群，解决人不在终端边 bot 卡在弹窗上的问题。\n— enabled（缺省 false）：总开关。setup 已把 hook 注册到 ~/.claude/settings.json，但不开此项 hook 立即静默退出，零影响\n— mode：'notify'（缺省，单向：群里发一条「🔐 需要授权」提示，终端照常等人）| 'approve'（双向：members.admin_open_ids 里的人回「允许 <id>」/「拒绝 <id>」即代答 CC；wait_secs 内无人回应交回终端 = fail-closed）\n— wait_secs（缺省 90，范围 10~540）：approve 模式等待时长\n安全：只认管理员；远端只能本次允许、绝不写 always-allow 规则；每次决策写 events.log 审计；发群前自动脱敏。bot paused 时不转发。",
+    "enabled": false,
+    "mode": "notify",
+    "wait_secs": 90
+  },
+
   "self_poll_interval": "3m",
   "polling_interval_ms": 60000,
+  "push_reconcile_interval_ms": 300000,
+  "_push_reconcile_interval_ms_comment": "仅 im.transport='push' 时生效：校对轮询间隔（ms），默认 300000 = 5min ≈ 288 calls/day（polling@60s 的 1/5）。事件流在代理 / 弱网下可能静默断流，这条低频轮询补漏；调小更稳但更贵。",
   "_polling_interval_ms_comment": "Monitor 模式下 poll.js tick 间隔（ms）。默认 60000 = 60s（v0.1.46+ 从 10s 调回，issue #23）。⚠ 配额成本：lark polling 每 tick 至少 1 次计费 OpenAPI 调用，而飞书基础版配额是**租户级共享 1M 调用/月**（跨企业下所有自建应用），空转也 24h 不停消耗。@60s 空转≈1440 calls/day≈43k/month；@10s≈8640/day≈259k/month（单 bot 就吃 1/4 租户配额）。成本公式 calls/month≈(86400/间隔秒)×30，调大直接线性降本。要更实时可设 10000~30000（自担配额）；多 bot / 多 app 共租户时务必调大。本字段不影响 slack（Socket Mode push，事件不计配额）。切记项目结束跑 /cc-bot:stop，孤儿 poll.js 会持续烧租户配额。",
   "mcp_required": [],
   "notes": ""

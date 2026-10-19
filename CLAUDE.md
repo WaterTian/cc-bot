@@ -12,7 +12,8 @@ cc-bot/
 ├── package.json                 # npm 元数据
 ├── adapters/                    # IM 抽象层
 │   ├── base.js                  # IMAdapter 基类（接口定义，含 push 模式 startListening/stopListening）
-│   ├── lark.js                  # 飞书实现（包 lark-cli，polling 模式）
+│   ├── factory.js               # v0.1.49+ createAdapter(profile) 单一入口（poll.js + permission-bridge.js 共用）
+│   ├── lark.js                  # 飞书实现（包 lark-cli；默认 polling，v0.1.49+ im.transport='push' 走 `lark-cli event consume` 事件长连接 + 自动重连，不可恢复抛 fatal 让 poll.js 回落）
 │   └── slack.js                 # Slack 实现（@slack/socket-mode + @slack/web-api，push 模式 v0.1.12+）
 ├── runtime/                    # 所有"决策 / 转换 / 状态管理"代码化的 CLI 工具（SKILL.md 调它们看返回 → 不再 prose 推理）
 │   ├── poll.js                  # 消息主进程（Monitor 托管）— 必须接 --project <abs>；IM_MODE='polling'(lark) / 'push'(slack)
@@ -29,6 +30,7 @@ cc-bot/
 │   ├── dispatch.js              # v0.1.25+ agents.json 调度生命周期（evaluate / register / complete / ls）— tags 冲突 + slot + 同 user 串行全代码化；v0.1.33+ register 同步预热流式卡片（首帧 6-10s → 1-2s, issue #15）+ complete 兜底 finalize 孤儿"● 处理中"卡；v0.1.35+ register 响应加 `preheated:bool`，SKILL.md 据此一行判要不要回群占位（不再 LLM 推 lark+flag）；v0.1.37+ `sweep` 子命令 + agents.json `version` CAS — poll.js 每 tick 按 `profile.dispatch.max_turn_time_mins`（默认 0=不启用）扫超时 running，finalize 卡片为「任务超时」+ 释放 slot；不杀 worker 进程
 │   ├── profile-migrate.js       # v0.1.29+ 版本化 profile schema migration — setup 跑 apply backfill 历史新增字段，doctor 跑 check 列 missing
 │   ├── todo-bridge.js           # v0.1.32+ CC PreToolUse hook bridge — 主会话 TodoWrite/TaskCreate/TaskUpdate 触发时自动 diff todos → spawn streaming-card.js 把进度推到当前 running 任务的卡片（worker 端零负担，hook 异步 detached 不阻塞主会话）
+│   ├── permission-bridge.js     # v0.1.49+ CC PermissionRequest hook — 主会话权限弹窗转群：notify 单向提示 / approve 管理员回「允许 <id>」代答（issue #10 / #17）；默认关，fail-closed，只认 admin_open_ids，远端只能本次允许，回复 id 写 poll.emitted 防被当新任务
 │   ├── statusline.js            # CC statusLine shim — 把 HUD stdin 落盘到 .cc-bot/runtime/hud-stdin.json
 │   ├── main-busy.js             # CC UserPromptSubmit/Stop hook — 写/删 .cc-bot/runtime/main-busy.lock（v0.1.6+）
 │   └── check-image-size.js      # 图片维度门禁（v0.1.11+ 防 Claude API 2000px dimension_limit 阻塞）
@@ -57,7 +59,7 @@ cc-bot/
 ## 架构要点
 
 - **IMAdapter 抽象**：`adapters/base.js` 定义接口（`listRecentMessages` / `sendText` / `sendImage` / `downloadResource` / `getUser`，以及 push 模式扩展的 `startListening` / `stopListening`）。已有实现：`adapters/lark.js`（polling）+ `adapters/slack.js`（push，v0.1.12+）。扩展新 IM 时新增 adapter 文件 + `runtime/poll.js` 的 factory 分支 + profile `im.type` 即可。
-- **两种工作模式**：`IM_MODE = 'polling'`（lark：HTTP 10s tick 拉 `listRecentMessages`，mainBusy 时不 emit 等下 tick 重 fetch）/ `'push'`（slack：Socket Mode WebSocket 推送，mainBusy 时**仍必须 emit**，错过永久丢失，与 polling 是根本不同原则）。详见 memory `feedback_push_mode_mainbusy`。
+- **两种工作模式**：`IM_MODE = 'polling'`（lark 默认：HTTP 60s tick 拉 `listRecentMessages`，mainBusy 时不 emit 等下 tick 重 fetch）/ `'push'`（slack：Socket Mode WebSocket 推送；lark v0.1.49+ `im.transport='push'` opt-in：`lark-cli event consume` 事件长连接，不计飞书配额，外加 `push_reconcile_interval_ms` 5min 校对轮询兜底静默断流，长连接不可用自动回落 polling）。push 模式 mainBusy 时**仍必须 emit**，错过永久丢失，与 polling 是根本不同原则。详见 memory `feedback_push_mode_mainbusy`。⚠ 一个 bot app 全局只能一条事件总线，多机共用同一 app 时只能一台开 push。
 - **IM 无关定位**：cc-bot 是 IM 无关的 Claude Code 群 bot 插件，目前已实现 lark + slack；见 memory `feedback_im_agnostic_design`。
 - **i18n**：`profile.im.locale` 缺省按 IM 类型决（lark=zh-CN / slack=en-US），覆盖 BUSY 占位 / 上下线通知 / HUD 行；详见 memory `feedback_im_i18n_default`。
 - **每项目独立 `.cc-bot/`**：使用 cc-bot 的项目在自己根目录下建 `.cc-bot/profiles/` + `.cc-bot/runtime/`，profile 和运行时状态都跟项目走，多项目互不污染。一项目一 IM。

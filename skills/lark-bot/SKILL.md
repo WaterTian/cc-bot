@@ -73,10 +73,11 @@ rm -f .cc-bot/runtime/group-bot-switch.tripwire
 
 ## 架构
 
-Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <root>`，每 10 秒通过 `IMAdapter.listRecentMessages()` 拉最近群消息（飞书 adapter 底层调 `lark-cli im +chat-messages-list` HTTP 短连接），对比 `state.last_processed_time` + `poll.emitted` 去重，emit `NEW_MSG|...` 到 stdout，Monitor 捕获为 notification 推送主会话。
+Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <root>`，每 `polling_interval_ms`（默认 60s）通过 `IMAdapter.listRecentMessages()` 拉最近群消息（飞书 adapter 底层调 `lark-cli im +chat-messages-list` HTTP 短连接），对比 `state.last_processed_time` + `poll.emitted` 去重，emit `NEW_MSG|...` 到 stdout，Monitor 捕获为 notification 推送主会话。
 
 ```
-主会话 ── Monitor(persistent) ── node poll.js ── 每 10s IMAdapter.listRecentMessages() (HTTP)
+主会话 ── Monitor(persistent) ── node poll.js ── 每 60s IMAdapter.listRecentMessages() (HTTP polling 默认)
+                                              │   或 im.transport='push'：lark-cli event consume 事件长连接 + 5min 校对轮询（v0.1.49+）
                                               ├─ state.last_processed_time + poll.emitted 去重
                                               └─ stdout: NEW_MSG|msg_id|sender|content|ts[|FLAGS=bot_switch_from_group]
                                                          ↓ Monitor → notification
@@ -102,7 +103,7 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
 
 **IM Adapter 层**：`adapters/base.js` 定义接口（`listRecentMessages` / `sendText` / `sendImage` / `downloadResource` / `getUser`），`adapters/lark.js` 实现飞书版（包 `lark-cli`）。poll.js 读 `profile.im.type` 实例化对应 adapter。未来加企业微信/钉钉/Slack 只需新增 adapter 文件 + profile 里改 `im.type`。
 
-**为什么走 HTTP 短连接**：`lark-cli event +subscribe` 的 WebSocket 长连接在 Clash/Verge 等 vpn 代理下被静默断流，`LARK_CLI_NO_PROXY=1` 对 WS 客户端无效。HTTP 短连接走代理稳定。
+**为什么默认 HTTP 短连接**：WebSocket 长连接在 Clash/Verge 等 vpn 代理下曾被静默断流，`LARK_CLI_NO_PROXY=1` 对 WS 客户端无效；HTTP 短连接走代理稳定。v0.1.49+ `im.transport='push'` 可 opt-in 事件长连接（不计飞书配额、实时），poll.js 配 `push_reconcile_interval_ms`（默认 5min）校对轮询兜住该坑；长连接起不来 / 不可恢复自动回落 polling 并打 `BOT_INFO|poll.js|push-fallback|<原因>`，主会话看到此行**无需动作**（服务未中断），doctor §3.6 可查原因。一个 bot app 全局只能一条事件总线，多机共用 app 时只能一台开 push。
 
 ### poll.js 三层防御（禁止删除）
 
@@ -369,6 +370,10 @@ LLM 职责收窄到「判语义匹配哪个 key」；占位符替换 / hint 摘�
 
 **Why**：`AskUserQuestion` 阻塞主会话时不触发 `Stop` → `main-busy.lock` 无法正常解锁 → 10min 过期后若 statusline 心跳也陈旧，poll.js 进入降级模式（不 emit + 持续占位），群消息无人消费。群成员在群里不在终端，选项卡永远等不到响应（实测可达 6 小时）。详见 §主会话优先级 的降级模式说明。
 
+### 权限弹窗转群（v0.1.49+，permission-bridge hook）
+
+主会话遇到不在 allow 列表的工具时 CC 弹「允许 / 拒绝」框 —— 这是 harness 层，LLM 感知不到也不该处理。`runtime/permission-bridge.js`（`PermissionRequest` hook，setup §8.7 注册）按 profile `permission_bridge` 自动转群：`notify` 单向提示 / `approve` 管理员回「允许 <id>」「拒绝 <id>」代答，超时交回终端。**LLM 零参与**；管理员那条回复已被 hook 写进 `poll.emitted`，不会再以 NEW_MSG 出现。群里有人问「为什么 bot 卡住了」而 `events.log` 有 `permission-bridge|ask` 无后续 → 答「等终端 / 管理员授权」即可。
+
 ### 完整流程
 
 0. **fetch 核对**（见上，最高优先级 2）
@@ -426,7 +431,7 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/ack-detect.js detect --text "<消息内容>"
 
 ### Monitor 异常时 API 兜底
 
-polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 10s 主动 HTTP 轮询拉消息 → emit NEW_MSG 到 stdout → notification 到主会话。**通常情况下 Monitor push 可靠**（不再有老架构的"Bash background stdout→pipe 压缩断开"问题）。
+polling 架构下，Monitor 工具托管的 `poll.js` 是主回路，每 60s（默认）主动 HTTP 轮询拉消息 → emit NEW_MSG 到 stdout → notification 到主会话。**通常情况下 Monitor push 可靠**（不再有老架构的"Bash background stdout→pipe 压缩断开"问题）。
 
 但以下三种场景仍需 API 兜底（直接调 `lark-cli im +chat-messages-list` 对比 `state.json.last_processed_time`，不走 poll.js / poll.emitted 通道）：
 
@@ -592,7 +597,7 @@ fan-out 任务（`subagent_count > 1`）：等**所有**子 agent 完成再调 c
    - `profile.im.busy_placeholder === false` → 全关 opt-out（普通态 + 降级态都不发）
    - **普通忙碌**：`per-lock dedup` — 同一 lock acquisition（同 `lockTs`）至多发 1 条；外加 5min 全局节流兜底，防 hook 高频 lock churn（多 turn 密集时 issue #6 的场景）击穿 per-lock dedup
    - **降级模式**：5min 周期心跳续发，保留卡死场景的"还活着"信号（v0.1.15 设计，issue #1）
-3. 主会话响应完（Stop）→ 锁删除 → 下一 tick（≤ 10s）恢复正常 fetch，积压消息通过 `poll.emitted` 去重机制补 emit，不会丢
+3. 主会话响应完（Stop）→ 锁删除 → 下一 tick（≤ 1 个 polling 间隔，默认 60s）恢复正常 fetch，积压消息通过 `poll.emitted` 去重机制补 emit，不会丢
 
 **为何 hook 走 `~/.claude/settings.json` 而不是 plugin `hooks.json`**：CC bug #10225 — plugin 声明的 `UserPromptSubmit` hook 完全不 fire。`main-busy.js` 自带"非 cc-bot 项目 silent skip"（检查 `.cc-bot/` 存在），全局注册对其他项目无副作用。
 
@@ -604,7 +609,7 @@ fan-out 任务（`subagent_count > 1`）：等**所有**子 agent 完成再调 c
 - `state.last_processed_time` 只由主会话推进；poll.js 不动它（推进纪律见 §最高优先级规则 2）
 - `poll.busy-held` 释放 emit 时若 `ct <= lastTime`，poll.js 写 `BOT_WARN|busy-held-late-release`，表示主会话可能已通过 fetch-before-reply 处理过；重复 emit 由主会话端 dedup（见 §最高优先级规则 2 "NEW_MSG 去重"）
 
-**测试 caveat**：`!` 前缀 bash 命令 UserPromptSubmit / Stop 毫秒级 fire，跨不了 poll tick（10s），会漏测。测本机制用真实 Claude prompt（≥10s 输出）。
+**测试 caveat**：`!` 前缀 bash 命令 UserPromptSubmit / Stop 毫秒级 fire，跨不了 poll tick（默认 60s），会漏测。测本机制用真实 Claude prompt（≥ 1 个 tick 的输出）。
 
 ### Claude 额度预警（v0.1.47+）
 
@@ -940,6 +945,6 @@ Monitor persistent task 意外退出（群消息长时间无 NEW_MSG 推送、�
    )
    ```
 4. **回写 task_id**：Monitor 返回新 task_id → Edit `state.json.monitor_task_id`
-5. **验证**：下一个 10s 周期观察 stdout 是否有 `NEW_MSG` / `BOT_INFO` / `BOT_ERROR`；仍无输出则 `/cc-bot:stop` + 人工排查 lark-cli auth 或 profile 字段
+5. **验证**：下一个 tick 周期（默认 60s）观察 stdout 是否有 `NEW_MSG` / `BOT_INFO` / `BOT_ERROR`；仍无输出则 `/cc-bot:stop` + 人工排查 lark-cli auth 或 profile 字段
 
 **不要做的事**：不要 `kill` 所有 node 进程（会跨项目误杀）；不要删 `.cc-bot/runtime/poll.emitted`（会导致历史消息被当新消息重推）。

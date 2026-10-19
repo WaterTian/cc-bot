@@ -509,6 +509,22 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
       - 首次注册 → `✓ 已注册 todo-bridge hook 到 ~/.claude/settings.json（主会话 TodoWrite 自动同步到流式卡片）`
       - 幂等跳过 → `✓ todo-bridge hook 已就位（跳过）`
 
+8.7. **注册 permission-bridge hook**（v0.1.49+）—— 让 `~/.claude/settings.json` 的 `hooks.PermissionRequest` 调 `runtime/permission-bridge.js`：主会话弹「允许 / 拒绝」权限框时转发到群（notify）或由群管理员代答（approve）。**功能缺省关闭**：profile `permission_bridge.enabled` 默认 `false`，hook 装了也是进程启动即静默退出，对所有项目零影响；用户按需在 profile 开。
+
+   a. Read `~/.claude/settings.json`（同 step 8 文件）。
+   b. 目标 hook 配置（注入 `hooks.PermissionRequest` 数组；不带 matcher = 所有工具的权限请求都经过，脚本自己按 profile 决定要不要动）：
+      ```json
+      {
+        "hooks": [
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/runtime/permission-bridge.js", "timeout": 600 }
+        ]
+      }
+      ```
+   c. 幂等合并：扫 `hooks.PermissionRequest[]`，若任一条目的 `.hooks[].command` 含 `permission-bridge.js`：完全等于目标 → 跳过；路径不同 → 替换；未找到 → append。
+   d. Tell user：
+      - 首次注册 → `✓ 已注册 permission-bridge hook（默认关闭。要用：profile.permission_bridge.enabled=true，mode 选 notify 单向提示 / approve 管理员群里代答）`
+      - 幂等跳过 → `✓ permission-bridge hook 已就位（跳过）`
+
 9. **注册必要权限集**（Bash + 插件缓存 Read/Edit/Write）到 `<project>/.claude/settings.local.json` — 让 cc-bot 正常运行 + setup/doctor/worker 派单不被 CC 反复打断权限询问。**纯加法 + 幂等**：从不覆盖用户已有规则，重跑设置不会重复加。
 
    a. Read `<project>/.claude/settings.local.json`。文件缺失 → 初值 `{}`；解析失败 → 直接报错「settings.local.json 格式错误，请先修复」并跳过本步（不能强写覆盖用户数据）。
@@ -682,6 +698,7 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
     - 若 `settings.json` 的 `statusLine.command` 未指向 cc-bot shim → 跑步骤 7 补注册（幂等，可重复）
     - 若 `settings.json` 的 `hooks.UserPromptSubmit` / `hooks.Stop` 无 cc-bot main-busy 命令 → 跑步骤 8 补注册（幂等）
     - 若 `settings.json` 的 `hooks.PreToolUse` 无 cc-bot todo-bridge 命令（v0.1.32+）→ 跑步骤 8.5 补注册（幂等）
+    - 若 `settings.json` 的 `hooks.PermissionRequest` 无 cc-bot permission-bridge 命令（v0.1.49+）→ 跑步骤 8.7 补注册（幂等）
     - 若 `.claude/settings.local.json` 无 Monitor 通配权限规则 → 跑步骤 9 补注册（幂等）
 
 用户任何阶段失败后修好，再发 `/cc-bot:setup` 会自动从断点续跑。

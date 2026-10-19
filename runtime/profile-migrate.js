@@ -48,6 +48,12 @@ const MIGRATIONS = [
   { version: '0.1.47', path: 'quota_alert.five_hour.urgent_at',    default: 95 },
   { version: '0.1.47', path: 'quota_alert.notify_recovered',       default: true },
   { version: '0.1.47', path: 'quota_alert.hold_messages_when_exhausted', default: true },
+  { version: '0.1.49', path: 'im.transport',                       default: '' },
+  { version: '0.1.49', path: 'push_reconcile_interval_ms',         default: 300000 },
+  { version: '0.1.49', path: 'permission_bridge',                  default: {} },
+  { version: '0.1.49', path: 'permission_bridge.enabled',          default: false },
+  { version: '0.1.49', path: 'permission_bridge.mode',             default: 'notify' },
+  { version: '0.1.49', path: 'permission_bridge.wait_secs',        default: 90 },
   // v0.1.27 曾加 im.streaming_card.short_threshold=100；v0.1.30 改为换行判据，字段不再被读取。
   // migration 移除——老 profile 留着此字段无害（代码不读），新 profile 不再 backfill。
 ]

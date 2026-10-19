@@ -7,14 +7,33 @@
 // 用裸 `lark-cli` 名 + bash 解析 PATH 找到对应可执行（Windows: lark-cli.cmd / Unix: lark-cli），
 // 避开 Node 20+ spawn 不再自动解析 .cmd 扩展、且 npm batch shim 处理特殊字符不安全的问题。
 
-const { execSync } = require('child_process')
+const { execSync, spawn } = require('child_process')
 const path = require('path')
+const readline = require('readline')
 const { IMAdapter } = require('./base')
 
 // 统一用 bash 作为 shell（Windows 借 Git Bash 的 sh shim，用 "$@" 安全传 argv）。
 // 绝不用 lark-cli.cmd — npm batch shim 的 %* 在遇到 & | % " 等字符时会损坏参数。
 const LARK_BIN = 'lark-cli'
 const DEFAULT_TIMEOUT_MS = 15 * 1000
+
+// ---- 事件长连接（push transport，issue #23 Phase 3）----
+// `lark-cli event consume im.message.receive_v1 --as bot` 是一条 NDJSON 子进程：
+//   stderr 先出 `[event] ready event_key=...` 再开始往 stdout 吐事件；
+//   启动失败在 stderr 给结构化 JSON envelope（{ok:false,error:{type,subtype,message,hint}}）；
+//   无界运行以 stdin EOF 作优雅退出信号（父进程死 → 管道断 → 子进程自己退，不留孤儿）。
+// 事件订阅**不计飞书 API 配额**，空闲零成本；polling 每 tick 至少 1 计费调用。
+const EVENT_KEY = 'im.message.receive_v1'
+const READY_RE = /\[event\] ready/
+const READY_TIMEOUT_MS = 30 * 1000
+const STOP_GRACE_MS = 3 * 1000
+// 重连退避：5s → 10s → 20s → 40s → 60s（封顶）；连续 5 次起不来视为本轮 push 不可用
+const RECONNECT_BASE_MS = 5 * 1000
+const RECONNECT_MAX_MS = 60 * 1000
+const RECONNECT_MAX_ATTEMPTS = 5
+// 这两类 envelope 是「环境不满足」而非瞬时故障：另一台机器占着事件总线 / 缺 scope / 未登录。
+// 重试无意义，直接判 fatal 让 poll.js 回落 polling。
+const FATAL_ERROR_TYPES = new Set(['validation', 'auth'])
 
 // 统一走 bash 作为 shell（Windows 借 Git Bash），避开 cmd.exe 对命令行 \n / 裸 " 的粗暴解析。
 // POSIX 单引号 quoting：内部字符全字面，' → '\''。JSON 字符串里不会出现 '，安全。
@@ -50,6 +69,25 @@ function normalizeMentions(mentions) {
     })
 }
 
+// 从 consume 子进程的 stderr 文本里抠结构化错误 envelope；抠不到返回 null。
+function parseErrorEnvelope(stderrText) {
+  const txt = String(stderrText || '')
+  const i = txt.indexOf('{')
+  const j = txt.lastIndexOf('}')
+  if (i < 0 || j <= i) return null
+  try {
+    const json = JSON.parse(txt.slice(i, j + 1))
+    if (json && json.ok === false && json.error) return json.error
+  } catch {}
+  return null
+}
+
+// 从 stderr 的 `[event] exited — ... (reason: xxx)` 行取退出原因
+function parseExitReason(stderrText) {
+  const m = /\(reason:\s*([a-z_-]+)\)/i.exec(String(stderrText || ''))
+  return m ? m[1] : ''
+}
+
 class LarkAdapter extends IMAdapter {
   /**
    * @param {{botAppId: string}} opts
@@ -62,6 +100,8 @@ class LarkAdapter extends IMAdapter {
     // epoch 不可变，一旦拉到即可跨 tick 复用；仅当 shortcut 出现缓存未覆盖的新 id 时才补拉，
     // 空转（窗口内 id 集不变）永不重复打 raw 调用 → listRecentMessages 从 2 次计费降到 1 次。
     this._epochCache = new Map()
+    // push transport 状态（startListening 时初始化）
+    this._listen = null
   }
 
   get botIdentity() {
@@ -239,6 +279,194 @@ class LarkAdapter extends IMAdapter {
       return { ok: true, reactionId }
     } catch (err) {
       return { ok: false, reason: (err && err.message || String(err)).slice(0, 200) }
+    }
+  }
+
+  // ---- push transport（issue #23 Phase 3）----
+
+  // 单条消息的 mentions 只能从 raw 端点拿（event consume 已把 @ 渲染进 content 文本，不带结构化
+  // mentions）。仅在 content 含 '@' 时调用，1 次计费 —— 只为 @他人过滤的精准性买单，空闲不花。
+  _fetchMentions(messageId) {
+    try {
+      const out = this._run(['api', 'GET', `/open-apis/im/v1/messages/${messageId}`, '--as', 'bot'], { timeout: 10 * 1000 })
+      const json = this._parseJson(out)
+      const it = ((json && json.data && json.data.items) || [])[0]
+      return normalizeMentions(it && it.mentions)
+    } catch {
+      return []
+    }
+  }
+
+  // event consume 吐出的扁平事件 → 标准 Message（与 listRecentMessages 同契约）
+  _normalizeEvent(ev) {
+    if (!ev || typeof ev !== 'object') return null
+    const id = ev.message_id || ev.id
+    if (!id) return null
+    const senderId = String(ev.sender_id || '')
+    const content = sanitize(ev.content)
+    return {
+      id,
+      senderId,
+      // 事件不会推 bot 自己发的消息；其它 bot 的消息 sender 是 app id（cli_ 前缀）
+      senderType: (senderId === this._botAppId || /^cli_/.test(senderId)) ? 'bot' : 'user',
+      type: ev.message_type,
+      content,
+      createTimeMs: Number(ev.create_time) || Number(ev.timestamp) || Date.now(),
+      mentions: content.includes('@') ? this._fetchMentions(id) : [],
+      raw: ev,
+    }
+  }
+
+  /**
+   * 建立事件长连接。resolve = 已收到 ready 标记；reject = 起不来（err.fatal=true 表示环境不满足，
+   * 重试无意义，调用方应回落 polling）。
+   * ready 之后的断流由本 adapter 自己按退避重连；连续 RECONNECT_MAX_ATTEMPTS 次失败或遇 fatal
+   * envelope → onError(err) 且 err.fatal=true，之后不再重连。
+   */
+  async startListening({ chatId, onMessage, onError } = {}) {
+    if (!onMessage) throw new Error('startListening: onMessage required')
+    if (!chatId) throw new Error('startListening: chatId required')
+    if (this._listen) throw new Error('startListening: already listening')
+    this._listen = { chatId, onMessage, onError, stopped: false, child: null, attempts: 0, timer: null }
+    await this._spawnConsumer()
+  }
+
+  _spawnConsumer() {
+    const L = this._listen
+    return new Promise((resolve, reject) => {
+      const env = { ...process.env, LARK_CLI_NO_PROXY: '1' }
+      // 跟 _run 同款：经 bash 解析 PATH（Windows 借 Git Bash 的 sh shim）；exec 让 lark-cli 直接
+      // 顶替 bash 进程，信号 / stdin EOF 不隔一层。
+      const cmd = ['exec', LARK_BIN, 'event', 'consume', EVENT_KEY, '--as', 'bot'].map(quoteArg).join(' ')
+      let child
+      try {
+        child = spawn('bash', ['-c', cmd], { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+      } catch (err) {
+        reject(Object.assign(new Error(`spawn failed: ${err.message}`), { fatal: true }))
+        return
+      }
+      L.child = child
+      let ready = false
+      let settled = false
+      let stderrBuf = ''
+      const settle = (fn, v) => { if (!settled) { settled = true; fn(v) } }
+
+      const readyTimer = setTimeout(() => {
+        if (ready) return
+        try { child.kill('SIGTERM') } catch {}
+        settle(reject, Object.assign(new Error(`event consume 未在 ${READY_TIMEOUT_MS / 1000}s 内 ready`), { fatal: false }))
+      }, READY_TIMEOUT_MS)
+
+      readline.createInterface({ input: child.stderr }).on('line', (line) => {
+        stderrBuf = (stderrBuf + line + '\n').slice(-8000)
+        if (!ready && READY_RE.test(line)) {
+          ready = true
+          clearTimeout(readyTimer)
+          L.attempts = 0
+          settle(resolve)
+        }
+      })
+
+      // stdout 逐行 JSON → 归一 → onMessage。串行处理保序（_fetchMentions 是同步 execSync）。
+      readline.createInterface({ input: child.stdout }).on('line', (line) => {
+        if (L.stopped) return
+        let ev
+        try { ev = JSON.parse(line) } catch { return }
+        try {
+          if (ev && ev.chat_id && ev.chat_id !== L.chatId) return  // 只收配置的那个群
+          const m = this._normalizeEvent(ev)
+          if (m) L.onMessage(m)
+        } catch (err) {
+          if (L.onError) L.onError(err)
+        }
+      })
+
+      child.on('error', (err) => {
+        clearTimeout(readyTimer)
+        settle(reject, Object.assign(new Error(`event consume spawn error: ${err.message}`), { fatal: true }))
+      })
+
+      child.on('exit', (code, signal) => {
+        clearTimeout(readyTimer)
+        if (L.child === child) L.child = null
+        const envelope = parseErrorEnvelope(stderrBuf)
+        const reason = parseExitReason(stderrBuf)
+        const detail = envelope
+          ? `${envelope.type}/${envelope.subtype || ''}: ${envelope.message || ''}${envelope.hint ? ' | hint: ' + envelope.hint : ''}`
+          : `exit code=${code} signal=${signal || ''}${reason ? ' reason=' + reason : ''}`
+        const fatal = !!(envelope && FATAL_ERROR_TYPES.has(envelope.type))
+        if (!ready) {
+          settle(reject, Object.assign(new Error(`event consume 启动失败: ${detail}`.slice(0, 600)), { fatal, envelope }))
+          return
+        }
+        if (L.stopped) return
+        // ready 之后掉线：fatal envelope → 交 poll.js 回落；否则退避重连
+        if (fatal) {
+          this._listen = null
+          if (L.onError) L.onError(Object.assign(new Error(`event stream 断开且不可恢复: ${detail}`.slice(0, 600)), { fatal: true, envelope }))
+          return
+        }
+        if (L.onError) L.onError(Object.assign(new Error(`event stream 断开，准备重连: ${detail}`.slice(0, 300)), { fatal: false, transient: true }))
+        this._scheduleReconnect()
+      })
+    })
+  }
+
+  _scheduleReconnect() {
+    const L = this._listen
+    if (!L || L.stopped) return
+    L.attempts += 1
+    if (L.attempts > RECONNECT_MAX_ATTEMPTS) {
+      this._listen = null
+      if (L.onError) L.onError(Object.assign(new Error(`event stream 连续 ${RECONNECT_MAX_ATTEMPTS} 次重连失败`), { fatal: true }))
+      return
+    }
+    const delay = Math.min(RECONNECT_BASE_MS * Math.pow(2, L.attempts - 1), RECONNECT_MAX_MS)
+    L.timer = setTimeout(() => {
+      L.timer = null
+      if (L.stopped) return
+      this._spawnConsumer().catch((err) => {
+        if (err && err.fatal) {
+          this._listen = null
+          if (L.onError) L.onError(Object.assign(err, { fatal: true }))
+          return
+        }
+        this._scheduleReconnect()
+      })
+    }, delay)
+    if (L.timer.unref) L.timer.unref()
+  }
+
+  // 优雅停：先关 stdin（lark-cli 的无界 consume 以 EOF 为退出信号，会走 OAPI 退订不留服务端订阅），
+  // 3s 没退再 SIGTERM。绝不 SIGKILL（lark-event skill 明说会漏退订）。
+  async stopListening() {
+    const L = this._listen
+    if (!L) return
+    L.stopped = true
+    if (L.timer) { clearTimeout(L.timer); L.timer = null }
+    this._listen = null
+    const child = L.child
+    if (!child) return
+    await new Promise((resolve) => {
+      let done = false
+      const finish = () => { if (!done) { done = true; resolve() } }
+      child.once('exit', finish)
+      try { child.stdin.end() } catch {}
+      setTimeout(() => { try { child.kill('SIGTERM') } catch {} }, STOP_GRACE_MS).unref()
+      setTimeout(finish, STOP_GRACE_MS + 2000).unref()
+    })
+  }
+
+  // 同步版，给 process 'exit' / 信号处理器用（那里等不了 Promise）
+  stopListeningSync() {
+    const L = this._listen
+    if (!L) return
+    L.stopped = true
+    if (L.timer) { clearTimeout(L.timer); L.timer = null }
+    this._listen = null
+    if (L.child) {
+      try { L.child.stdin.end() } catch {}
+      try { L.child.kill('SIGTERM') } catch {}
     }
   }
 

@@ -1,7 +1,7 @@
 <!--
   cc-bot — Claude Code IM-bot plugin
   Develop project from group chat — by Claude Code. Lark/Feishu + Slack, IM-agnostic by design.
-  Core: IMAdapter abstraction · Monitor + polling (HTTP 10s, lark) or Socket Mode push (Slack) · statusline shim · interactive setup wizard · per-project profiles · i18n (zh-CN / en-US)
+  Core: IMAdapter abstraction · Monitor + polling (HTTP 60s, lark; opt-in event push v0.1.49+) or Socket Mode push (Slack) · permission bridge (CC permission prompts → group) · statusline shim · interactive setup wizard · per-project profiles · i18n (zh-CN / en-US)
 
   ## Auto-install (for Claude Code AI agents)
   Step 1: /plugin marketplace add WaterTian/cc-bot
@@ -206,7 +206,8 @@ Every step is **idempotent** — rerun safely. Then **`/cc-bot:start`** — bot 
 ## How It Works
 
 ```
-Main session ── Monitor(persistent) ── node poll.js ── lark: every 60s IMAdapter.listRecentMessages()
+Main session ── Monitor(persistent) ── node poll.js ── lark: every 60s IMAdapter.listRecentMessages()  (default)
+                                                       lark: `lark-cli event consume` long-connection push + 5min reconcile  (im.transport='push', v0.1.49+)
                                                        slack: Socket Mode WebSocket push (event-driven)
                                                     ├─ dedupe via state.last_processed_time + poll.emitted
                                                     └─ stdout: NEW_MSG|msg_id|sender|text|ts
@@ -222,7 +223,7 @@ Main session ── Monitor(persistent) ── node poll.js ── lark: every 6
 
 <table>
 <tr>
-  <td align="center"><b>HTTP polling (lark)</b><br/><sub>60s default interval · VPN-proxy safe</sub></td>
+  <td align="center"><b>Polling or event push (lark)</b><br/><sub>60s HTTP polling default · opt-in long-connection push<br/>(quota-free, auto-fallback)</sub></td>
   <td align="center"><b>Socket Mode push (slack)</b><br/><sub>WebSocket event-driven<br/>mainBusy still emits</sub></td>
   <td align="center"><b>3-layer defense</b><br/><sub>PID lockfile · EPIPE self-kill<br/>state future-value heal</sub></td>
   <td align="center"><b>Per-project isolation</b><br/><sub>.cc-bot/ per project<br/>zero cross-contamination</sub></td>
@@ -244,6 +245,8 @@ Main session ── Monitor(persistent) ── node poll.js ── lark: every 6
 | `runtime/dispatch.js` | agents.json 调度生命周期（evaluate / register / complete / **sweep**）— tags 冲突 + slot + 同 user 串行全代码化。v0.1.33+ register 同步预热流式卡片（首帧 6-10s → 1-2s）；v0.1.35+ register 响应带 `preheated:bool` 让 SKILL.md 一行判要不要回群占位；v0.1.37+ `sweep` 子命令按 `profile.dispatch.max_turn_time_mins`（默认 0=不启用）回收超时 running + 释放 slot + agents.json `version` 字段 CAS 防 lost update |
 | `runtime/profile-migrate.js` | 版本化 profile schema migration — 升级时自动 backfill 历史新增字段，不覆盖用户已设值 |
 | `runtime/quota-alert.js` | v0.1.47+ Claude 5h 额度预警 — 读 HUD 的 `rate_limits.five_hour`，跨 85 / 95 / 耗尽 三档各发群一条 ≤2 行提示（`resets_at` 当窗口键去重，窗口滚动自动清零 + 补发「已恢复」）。耗尽期群消息走 `busy-held` 暂存不 emit，恢复后补推。判定放 poll.js 是因为它是独立进程**不吃额度**，额度耗尽时唯一还能开口的组件。开关 / 阈值见 `profile.quota_alert`（默认开，85 / 95）|
+| `runtime/permission-bridge.js` | v0.1.49+ CC `PermissionRequest` hook — 主会话弹「允许 / 拒绝」权限框时转发到群：`notify`（单向提示）或 `approve`（`members.admin_open_ids` 回「允许 <id>」/「拒绝 <id>」代答 CC，超时交回终端 = fail-closed）。默认关；远端只能本次允许、不写 always-allow；每次决策写 events.log 审计；管理员回复 id 写入 `poll.emitted` 不会被当新任务 |
+| `adapters/factory.js` | v0.1.49+ `createAdapter(profile)` 单一入口，poll.js / permission-bridge.js 共用字段校验 + 实例化 |
 | `runtime/todo-bridge.js` | v0.1.32+ CC `PreToolUse` hook bridge — 主会话调 TodoWrite / TaskCreate / TaskUpdate 时自动 diff todos 变化 → spawn streaming-card.js 把进度（▸ 进行中 / ✓ 完成）推到当前 running 任务的卡片，**worker 端零负担**（hook 异步 detached 不阻塞主会话）|
 
 **设计原则**：决策、转换、状态管理代码化，prose（SKILL.md / worker.md）只描述"调哪个命令、按返回 action 走"，**LLM 推理负担和文档膨胀双降**。
@@ -327,6 +330,39 @@ cc-bot ships with **Lark + Slack**. Adding WeCom / DingTalk / Discord / Telegram
 2. Add factory branch in `runtime/poll.js`: `if (im.type === '<im>') { ... }`; set `IM_MODE = 'polling'` (HTTP fetch loop) or `'push'` (WebSocket / callback) — push-mode messages **must emit even during mainBusy** (errors are permanent, no retry tick)
 3. Set `im.type` in `profile.active.json` to the new IM name; optionally extend `DEFAULT_LOCALE_BY_IM` for system-message i18n
 4. Add `skills/<im>-bot/SKILL.md` or extend existing one
+
+<br/>
+
+## Lark Transport — polling vs event push (v0.1.49+)
+
+Feishu's free tier meters **tenant-wide** API calls (1M / month, shared by every self-built app). Polling bills ≥1 call per tick even when nobody talks; **event subscriptions are not metered**.
+
+| `im.transport` | How messages arrive | Idle cost | When to use |
+|---|---|---|---|
+| `""` / `"polling"` (default) | `lark-cli im +chat-messages-list` every `polling_interval_ms` (60s) | ≈1440 calls/day | Works everywhere, including behind VPN proxies |
+| `"push"` | `lark-cli event consume im.message.receive_v1` long connection, real-time, plus a `push_reconcile_interval_ms` (5min) catch-up poll | ≈288 calls/day | Lower quota + lower latency; one event bus per app globally |
+
+Enable: set `im.transport: "push"` in `.cc-bot/profiles/active.json`, then `/cc-bot:stop` + `/cc-bot:start`. If the long connection cannot start (another host already holds this app's event bus, missing scope, not logged in) or drops for good, poll.js **falls back to polling automatically** and prints `BOT_INFO|poll.js|push-fallback|<reason>` — service never stops. `/cc-bot:doctor` §3.6 shows which transport is live.
+
+> [!NOTE]
+> Feishu allows **one event bus per app**. If the same bot app runs cc-bot on several machines, only one of them may use `push`; the others stay on polling (the conflict is detected and reported, not silently split).
+
+<br/>
+
+## Permission Bridge — CC permission prompts in the group (v0.1.49+)
+
+When the main session hits a tool that is not in the allow list, Claude Code shows an **Allow / Deny** dialog and waits for someone at the terminal. With a remote team that means the bot just goes quiet. The permission bridge is a CC `PermissionRequest` hook (`runtime/permission-bridge.js`, registered by `/cc-bot:setup`) that forwards the prompt to the chat:
+
+```json
+"permission_bridge": { "enabled": true, "mode": "approve", "wait_secs": 90 }
+```
+
+| `mode` | Behaviour |
+|---|---|
+| `notify` | One-way: posts `🔐 需要授权 #ab12 · 工具 · 内容`, the terminal dialog still decides |
+| `approve` | Two-way: an admin (`members.admin_open_ids`) replies `允许 ab12` / `拒绝 ab12` (or `allow` / `deny`) and the hook answers CC; no reply within `wait_secs` → hands back to the terminal (fail-closed) |
+
+Guard rails: default **off**; only admins are honoured; remote approval is **this call only** (never writes an always-allow rule); every decision is audited in `.cc-bot/runtime/events.log`; the prompt text is redacted before posting; the admin's reply is consumed so poll.js does not treat it as a new task. Dry-run without CC: `node <plugin>/runtime/permission-bridge.js probe --project <root> --mode approve --wait 60`.
 
 <br/>
 
