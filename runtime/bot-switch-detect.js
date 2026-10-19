@@ -27,6 +27,7 @@
 
 const fs = require('fs')
 const path = require('path')
+const { atomicWriteSync } = require('./atomic-write')
 
 // 含 bot 后缀（任意空白）
 const SWITCH_PATTERNS = [
@@ -71,7 +72,7 @@ function tripwirePath(runtimeDir) {
 function writeTripwire(runtimeDir, entry) {
   try {
     fs.mkdirSync(runtimeDir, { recursive: true })
-    fs.writeFileSync(tripwirePath(runtimeDir), JSON.stringify(entry))
+    atomicWriteSync(tripwirePath(runtimeDir), JSON.stringify(entry))  // 半截 JSON 会让闸门静默失效，走原子写
   } catch {
     // tripwire 是装饰性，写失败不影响主流程（仍走 envelope FLAGS）
   }

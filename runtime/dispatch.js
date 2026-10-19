@@ -40,7 +40,8 @@ const QUEUE_LIMIT = 10
 const PATH_LIKE_PREFIXES = new Set(['read', 'write'])  // 用前缀匹配
 // 其它前缀（mcp / port / net / exclusive 等）走 exact-equal
 const STREAMING_CARD_CLI = path.join(__dirname, 'streaming-card.js')
-const PREHEAT_TIMEOUT_MS = 3000  // 预热卡 / 孤儿兜底 finalize 的硬上限
+const PREHEAT_TIMEOUT_MS = 3000   // 预热卡的硬上限（在主会话关键路径上，宁可放弃预热）
+const FINALIZE_TIMEOUT_MS = 15000 // 孤儿 / 超时 finalize 的上限：node 启动 + lark-cli HTTPS PUT，3s 常不够，杀早了卡片 finalize 了 state 却还 running → 下次重 PUT 被拒 → 整段正文当文本重发
 
 // === 冲突逻辑 ===
 
@@ -184,7 +185,8 @@ function preheatCard({ project, newTask }) {
   const subject = pickSubject(newTask, profile)
   const content = `**接到任务：${subject}**\n\n排队中，启动 worker...`
   try {
-    execFileSync('node', [
+    // process.execPath 而非 'node'：CC 从 GUI / launcher 启动时 PATH 里常没有 nvm 的 node，ENOENT 会被静默吞掉
+    execFileSync(process.execPath, [
       STREAMING_CARD_CLI, 'report',
       '--project', project,
       '--msg-id', newTask.msg_id,
@@ -225,14 +227,14 @@ function finalizeStrandedCard({ project, removed }) {
   try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')) } catch { return }
   if (state.mode !== 'card' || state.terminal !== 'running') return
   try {
-    execFileSync('node', [
+    execFileSync(process.execPath, [
       STREAMING_CARD_CLI, 'report',
       '--project', project,
       '--msg-id', removed.msg_id,
       '--final',
       '--status', 'error',
       '--error-msg', 'worker 异常退出，未发回结论',
-    ], { stdio: 'ignore', timeout: PREHEAT_TIMEOUT_MS, windowsHide: true })
+    ], { stdio: 'ignore', timeout: FINALIZE_TIMEOUT_MS, windowsHide: true })
   } catch {}
 }
 
@@ -260,6 +262,8 @@ function register({ project, newTask }) {
 
   // CAS-only：评估 + 修改 + 写。preheat / 文本占位等 side effects 放 CAS 外做（重试不重发）。
   const outcome = withCAS(project, (agents) => {
+    // CAS 重试会重跑本回调：先清掉上一轮可能写进 enriched 的派单 / 入队字段，别把 dispatch 轮的 started_at 带进 queue 轮
+    delete enriched.started_at; delete enriched.started_at_ms; delete enriched.queued_at; delete enriched.reason
     const decision = evaluate({ newTask, agentsJson: agents })
     if (decision.action === 'dispatch') {
       enriched.started_at = new Date().toISOString()
@@ -399,13 +403,13 @@ function finalizeTimeoutCard({ project, task, locale, maxMins }) {
   if (state.mode !== 'card' || state.terminal !== 'running') return
   const msgFn = TIMEOUT_MSGS[locale] || TIMEOUT_MSGS['zh-CN']
   try {
-    execFileSync('node', [
+    execFileSync(process.execPath, [
       STREAMING_CARD_CLI, 'report',
       '--project', project,
       '--msg-id', task.msg_id,
       '--final', '--status', 'error',
       '--error-msg', msgFn(maxMins),
-    ], { stdio: 'ignore', timeout: PREHEAT_TIMEOUT_MS, windowsHide: true })
+    ], { stdio: 'ignore', timeout: FINALIZE_TIMEOUT_MS, windowsHide: true })
   } catch {}
 }
 
@@ -424,6 +428,8 @@ function sweep({ project }) {
   let promoted = null
   try {
     withCAS(project, (agents) => {
+      toSweep.length = 0  // CAS 重试会重跑本回调：清掉上一轮的累积，否则 swept_ids 重复、promoted 可能指向被丢弃的那轮
+      promoted = null
       const remain = []
       for (const r of agents.running) {
         const startedMs = Number(r.started_at_ms || 0)

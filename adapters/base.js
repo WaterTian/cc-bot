@@ -110,7 +110,9 @@ class IMAdapter {
    * 每收到一条用户消息调一次 onMessage(stdMessage)。adapter 内部负责重连/心跳/
    * 断流监控，断流且无法自愈时调 onError(err) 让 poll.js 决定退出策略。
    *
-   * @param {{chatId: string, onMessage: (m: Message) => void, onError?: (e: Error) => void}} opts
+   * @param {{chatId: string, chatIds?: string[], onMessage: (m: Message) => void, onError?: (e: Error) => void}} opts
+   *   chatIds（v0.1.51+ 多群，issue #24）：要监听的全部群；adapter 只放行集合内的消息。每条 Message 带 chatId。
+   *   onError(err)：err.fatal=true 不可恢复 / err.transient=true 正在重连 / err.warn=true 仅告警（如事件缺字段被丢弃）
    * @returns {Promise<void>}  返回时表示监听已建立（首次 hello/ack 收到）
    */
   async startListening(opts) {

@@ -246,6 +246,7 @@ Main session ── Monitor(persistent) ── node poll.js ── lark: every 6
 | `runtime/profile-migrate.js` | 版本化 profile schema migration — 升级时自动 backfill 历史新增字段，不覆盖用户已设值 |
 | `runtime/quota-alert.js` | v0.1.47+ Claude 5h 额度预警 — 读 HUD 的 `rate_limits.five_hour`，跨 85 / 95 / 耗尽 三档各发群一条 ≤2 行提示（`resets_at` 当窗口键去重，窗口滚动自动清零 + 补发「已恢复」）。耗尽期群消息走 `busy-held` 暂存不 emit，恢复后补推。判定放 poll.js 是因为它是独立进程**不吃额度**，额度耗尽时唯一还能开口的组件。开关 / 阈值见 `profile.quota_alert`（默认开，85 / 95）|
 | `runtime/permission-bridge.js` | v0.1.49+ CC `PermissionRequest` hook — 主会话弹「允许 / 拒绝」权限框时转发到群：`notify`（单向提示）或 `approve`（`members.admin_open_ids` 回「允许 <id>」/「拒绝 <id>」代答 CC，超时交回终端 = fail-closed）。默认关；远端只能本次允许、不写 always-allow；每次决策写 events.log 审计；管理员回复 id 写入 `poll.emitted` 不会被当新任务 |
+| `runtime/stall-alert.js` | v0.1.50+ 主会话假死告警 — emit 后 `heartbeat.stall_mins` 内 HUD 心跳 / `agents.json` / 群内 bot 发言 三路本地信号都没动 → 发群「似乎卡住了」+ 终端 BOT_WARN，恢复补「已恢复」；默认关，零额外 API |
 | `adapters/factory.js` | v0.1.49+ `createAdapter(profile)` 单一入口，poll.js / permission-bridge.js 共用字段校验 + 实例化 |
 | `runtime/todo-bridge.js` | v0.1.32+ CC `PreToolUse` hook bridge — 主会话调 TodoWrite / TaskCreate / TaskUpdate 时自动 diff todos 变化 → spawn streaming-card.js 把进度（▸ 进行中 / ✓ 完成）推到当前 running 任务的卡片，**worker 端零负担**（hook 异步 detached 不阻塞主会话）|
 
@@ -263,6 +264,7 @@ Main session ── Monitor(persistent) ── node poll.js ── lark: every 6
 | `/cc-bot:new-profile <name>` | Create new profile from template |
 | `/cc-bot:switch <name>` | Switch active profile (auto-stops running bot first) |
 | `/cc-bot:doctor` | Read-only health check — version drift, profile validity, runtime state, zombie permissions, shim registration |
+| `/cc-bot:poll-once` | One polling round (`poll.js --once`), driven by `/loop` — only for `polling_mode = self-poll` endpoints that cannot host `Monitor` |
 
 Main session also accepts natural-language triggers (`开bot` / `关bot` / `switch to xxx`).
 
@@ -327,9 +329,30 @@ Works for **any project type** — Web / mini-program / Node service / Python da
 cc-bot ships with **Lark + Slack**. Adding WeCom / DingTalk / Discord / Telegram / etc:
 
 1. Add `adapters/<im>.js` extending `IMAdapter` (see `adapters/base.js`) — implement `listRecentMessages / sendText / sendImage / downloadResource / getUser`; for push-based IMs also implement `startListening / stopListening` (see `adapters/slack.js` for Socket Mode reference)
-2. Add factory branch in `runtime/poll.js`: `if (im.type === '<im>') { ... }`; set `IM_MODE = 'polling'` (HTTP fetch loop) or `'push'` (WebSocket / callback) — push-mode messages **must emit even during mainBusy** (errors are permanent, no retry tick)
+2. Add a branch in `adapters/factory.js` (`createAdapter`) — poll.js and permission-bridge.js both instantiate through it; in `runtime/poll.js` pick `IM_MODE = 'polling'` (HTTP fetch loop) or `'push'` (WebSocket / callback) — push-mode messages **must emit even during mainBusy** (errors are permanent, no retry tick). Every normalized message must carry `chatId`
 3. Set `im.type` in `profile.active.json` to the new IM name; optionally extend `DEFAULT_LOCALE_BY_IM` for system-message i18n
 4. Add `skills/<im>-bot/SKILL.md` or extend existing one
+
+<br/>
+
+## Multiple Groups — `im.chat_ids` (v0.1.51+)
+
+One project can serve several groups (issue #24). Keep `im.chat_id` as the **primary** group and list the others in `im.chat_ids`:
+
+```json
+"im": { "chat_id": "oc_primary…", "chat_ids": ["oc_second…", "oc_third…"] }
+```
+
+| Behaviour | Multi-group rule |
+|---|---|
+| Polling | poll.js fetches every group each tick (≈1 billed call per group per tick); one group failing only logs `BOT_WARN|poll.js|poll-chat-failed`, the others keep working |
+| Cursors | **one cursor per group** in `.cc-bot/runtime/poll.cursors.json`, advanced by poll.js on emit. A single global cursor would drop a message from group B that was sent earlier than, but fetched after, a message from group A — exactly the silent loss reported in #24. New groups start from the global `last_processed_time` so history is not replayed |
+| Envelope | every `NEW_MSG` ends with `\|CHAT=<chat_id>`; the main session replies and does its fetch-before-reply check in **that** group. Single-group envelopes are unchanged |
+| Push (`im.transport: "push"` / Slack) | one event stream, filtered by the configured set; events without a chat id are dropped (fail-closed) |
+| Proactive messages | busy placeholder and stall alert go to the group that triggered them; quota alerts are broadcast to all groups; `/cc-bot:start` / `stop` notify every group; the permission bridge stays on the primary group |
+| Upgrade safety | the array lives in the profile, not in a patched plugin file, so a plugin update can no longer silently turn the second group off; `/cc-bot:doctor` §2 validates the list |
+
+Add the field, then `/cc-bot:stop` + `/cc-bot:start`. `im.chat_ids: []` (the default) keeps the old single-group behaviour byte-for-byte.
 
 <br/>
 
@@ -360,9 +383,9 @@ When the main session hits a tool that is not in the allow list, Claude Code sho
 | `mode` | Behaviour |
 |---|---|
 | `notify` | One-way: posts `🔐 需要授权 #ab12 · 工具 · 内容`, the terminal dialog still decides |
-| `approve` | Two-way: an admin (`members.admin_open_ids`) replies `允许 ab12` / `拒绝 ab12` (or `allow` / `deny`) and the hook answers CC; no reply within `wait_secs` → hands back to the terminal (fail-closed) |
+| `approve` | Two-way: an admin (`members.admin_open_ids`) replies `允许 ab12` / `拒绝 ab12` (or `allow` / `deny`) and the hook answers CC; no reply within `wait_secs` → hands back to the terminal (fail-closed). Generic acks (`ok` / `yes` / `1` / `好`) only count when the `#id` is included, so a casual "ok" to a colleague never approves a tool call |
 
-Guard rails: default **off**; only admins are honoured; remote approval is **this call only** (never writes an always-allow rule); every decision is audited in `.cc-bot/runtime/events.log`; the prompt text is redacted before posting; the admin's reply is consumed so poll.js does not treat it as a new task. Dry-run without CC: `node <plugin>/runtime/permission-bridge.js probe --project <root> --mode approve --wait 60`.
+Guard rails: default **off**; only admins are honoured; remote approval is **this call only** (never writes an always-allow rule); every decision is audited in `.cc-bot/runtime/events.log`; the prompt text is redacted before posting (unknown / MCP tools show only whitelisted fields); the admin's reply is consumed by the hook **and** recognised by poll.js itself, so it is never treated as a new task even in push mode. With multiple groups the bridge uses the primary `im.chat_id` only. Dry-run without CC: `node <plugin>/runtime/permission-bridge.js probe --project <root> --mode approve --wait 60`.
 
 <br/>
 
@@ -392,7 +415,7 @@ After poll.js hands a group message to the main session it watches three **local
 | 邮箱 / 中国手机号 | `<redacted:email>` / `<redacted:phone_cn>` |
 | `profile.privacy.blocklist` 自定义真名 | `<同事>`（可改 `blocklist_replace`）|
 
-worker 不需要手动调；CLI 强制脱敏，无遗漏路径。
+worker 不需要手动调；所有**代码发群路径**（worker 卡片 / 文本、slack-send、权限桥、额度与假死告警）强制脱敏。主会话 inline 用 `lark-cli im +messages-reply` 直接回的短消息由 LLM 按 SKILL 规则自律，不经代码脱敏。
 
 **② Pre-commit hook（开发本仓库时装）** — 阻塞真实 IM ID / 黑名单真名 / api-secret 进 git commit。一次性 setup 见 CLAUDE.md §Git 提交隐私防护.
 

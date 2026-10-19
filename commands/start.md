@@ -43,7 +43,7 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/bot-switch-detect.js gate --project <project.
    d. 三步都是 quick fs ops，~100ms 内完成；若都无补 → 不报（保持 start 简洁视觉）
 
 1. **并行 Read**：
-   - `.cc-bot/profiles/active.json`（拿 `im.chat_id`、`im.bot_app_id`、`project.root`、`paths.bot_temp_abs`、`polling_mode`、`self_poll_interval`）
+   - `.cc-bot/profiles/active.json`（拿 `im.chat_id`、`im.chat_ids`（多群，可空）、`im.bot_app_id`、`project.root`、`paths.bot_temp_abs`、`polling_mode`、`self_poll_interval`）
    - `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`（拿 `version`，用于上线通知标题）
 
 1.5. **polling_mode 漂移检测**（v0.1.20，issue #8）：读 `process.env.ANTHROPIC_BASE_URL`，按 setup Stage E step 4 同样的逻辑算出 `expected_mode`（含 `api.anthropic.com` 或未设 → `monitor`；否则 → `self-poll`）。若 `expected_mode !== profile.polling_mode`，**在主会话打一行 ⚠ 警告，但不阻塞、不修改 profile**：
@@ -62,7 +62,7 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/bot-switch-detect.js gate --project <project.
    - **启动消息回路 — 按 `profile.polling_mode` 分流**（缺省/缺字段 = `monitor`）：
      - **`monitor`（默认，官方 Claude）**：用 `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js --project <project.root>`（persistent, timeout_ms=3600000）。Monitor 把 poll.js stdout 的 NEW_MSG 转 notification 推送主会话。**默认路径，行为与历来一致。**
      - **`self-poll`（弱 agentic 端点如 DeepSeek，无法调用 Monitor）**：**本步不开 Monitor、不进并行批**；改在第 3 步（发完通知、写好 state 后）启动轮询循环。理由：Monitor 是 deferred 工具，弱端点不会 ToolSearch 加载它、退回 Bash 后台进程而 stdout 不唤醒主会话；self-poll 用主会话自己的 `/loop` 周期跑 `poll.js --once` 绕开 Monitor。
-   - Bash 发上线通知 — **按 `im.type` 选发送方式，按 `im.locale` 选文案语言**（缺省：`lark`=`zh-CN` / `slack`=`en-US`；profile.im.locale 显式覆盖）：
+   - Bash 发上线通知 — **按 `im.type` 选发送方式，按 `im.locale` 选文案语言**（缺省：`lark`=`zh-CN` / `slack`=`en-US`；profile.im.locale 显式覆盖）。**多群**（v0.1.51+，`im.chat_ids` 非空）：对 `[im.chat_id, ...im.chat_ids]` 去重后的**每个群各发一条**同一模板（lark 换 `--chat-id`；slack 加 `--channel <id>`），某群失败不影响其它群：
 
      **`im.type === 'lark'`**：用 `lark-cli` + `--content '<JSON>'` 方式（不要 `--text` + `$'...'`，Windows Git Bash 转义不稳）
      ```bash
@@ -118,4 +118,4 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/bot-switch-detect.js gate --project <project.
 - Monitor 启动立即报 error → 主会话报"Monitor 启动失败：{msg}"
 - 上线通知 lark-cli 失败 → 报"通知发送失败：{msg}"但 Monitor 仍在跑，不回滚 state
 
-`profile.im.type` 非 `lark` 时参考 SKILL.md 的 adapter 分支（未来扩展）。
+`im.type` 为 `slack` 时发送方式见上面的 slack 分支；其它值 `/cc-bot:doctor` 会报 unsupported adapter。

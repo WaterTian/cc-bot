@@ -60,8 +60,7 @@ LARK_CLI_NO_PROXY=1 lark-cli im +messages-reply --as bot \
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/runtime/slack-send.js send-text \
   --project <project.root> \
-  --text "Bot switch (start/stop) must be initiated from the Claude Code main session. Group-message switches are rejected." \
-  --reply-to <thread_ts>
+  --text "Bot switch (start/stop) must be initiated from the Claude Code main session. Group-message switches are rejected."
 ```
 
 回复完后清 tripwire（commands/stop.md/start.md 的 gate 也读它，避免下一次主会话真正 stop 被误拒）：
@@ -79,7 +78,7 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
 主会话 ── Monitor(persistent) ── node poll.js ── 每 60s IMAdapter.listRecentMessages() (HTTP polling 默认)
                                               │   或 im.transport='push'：lark-cli event consume 事件长连接 + 5min 校对轮询（v0.1.49+）
                                               ├─ state.last_processed_time + poll.emitted 去重
-                                              └─ stdout: NEW_MSG|msg_id|sender|content|ts[|FLAGS=bot_switch_from_group]
+                                              └─ stdout: NEW_MSG|msg_id|sender|content|ts[|FLAGS=bot_switch_from_group][|CHAT=<群id>]（多群 v0.1.51+）
                                                          ↓ Monitor → notification
                                                    主会话 → 意图判定 → adapter.sendText / bash lark-cli
                                                          （FLAGS=bot_switch_from_group → 见 §群消息开关拒绝示例）
@@ -101,7 +100,7 @@ Claude Code `Monitor` 工具托管 `node ${CLAUDE_PLUGIN_ROOT}/runtime/poll.js -
 - 停止：`paused=true` 软停（poll-once 经 poll.js --once 读到 paused 立即返回不处理）；彻底结束循环需中断运行 /loop 的会话。
 - 详见 memory `reference_deepseek_agentic_incompatible`。**默认 monitor，仅显式配 self-poll 才走这套。**
 
-**IM Adapter 层**：`adapters/base.js` 定义接口（`listRecentMessages` / `sendText` / `sendImage` / `downloadResource` / `getUser`），`adapters/lark.js` 实现飞书版（包 `lark-cli`）。poll.js 读 `profile.im.type` 实例化对应 adapter。未来加企业微信/钉钉/Slack 只需新增 adapter 文件 + profile 里改 `im.type`。
+**IM Adapter 层**：`adapters/base.js` 定义接口（`listRecentMessages` / `sendText` / `sendImage` / `downloadResource` / `getUser` / `addReaction`，push 模式再加 `startListening` / `stopListening`），已有 `adapters/lark.js`（飞书，包 `lark-cli`）和 `adapters/slack.js`（Socket Mode）；`adapters/factory.js` 按 `profile.im.type` 实例化，poll.js 与 permission-bridge 共用。加企业微信 / 钉钉等只需新增 adapter 文件 + factory 分支 + profile 里改 `im.type`。
 
 **为什么默认 HTTP 短连接**：WebSocket 长连接在 Clash/Verge 等 vpn 代理下曾被静默断流，`LARK_CLI_NO_PROXY=1` 对 WS 客户端无效；HTTP 短连接走代理稳定。v0.1.49+ `im.transport='push'` 可 opt-in 事件长连接（不计飞书配额、实时），poll.js 配 `push_reconcile_interval_ms`（默认 5min）校对轮询兜住该坑；长连接起不来 / 不可恢复自动回落 polling 并打 `BOT_INFO|poll.js|push-fallback|<原因>`，主会话看到此行**无需动作**（服务未中断），doctor §3.6 可查原因。一个 bot app 全局只能一条事件总线，多机共用 app 时只能一台开 push。
 
@@ -151,7 +150,7 @@ Read profile  ──┐
 
 #### 具体步骤
 
-1. **读 profile**（单次 Read）：获取 `im.chat_id` / `im.bot_app_id` / `project.root` / `paths.bot_temp_abs` 等
+1. **读 profile**（单次 Read）：获取 `im.chat_id` / `im.chat_ids`（多群，可空）/ `im.bot_app_id` / `project.root` / `paths.bot_temp_abs` 等
 2. **单批次并行发起**：
    - Edit `.cc-bot/runtime/state.json`：`paused=false, monitor_task_id=null`
    - Bash: `mkdir -p <bot_temp_abs>`（幂等，目录已存在时零开销）
@@ -235,7 +234,13 @@ Context · {bar} X%
 | `.cc-bot/runtime/main-busy-notified.flag` | 群占位消息全局节流时间戳（v0.1.16+：mtimeMs = 上次发占位时刻；与 lock 生命周期解耦，unlock 不再清；详见 §主会话优先级 占位策略） |
 | `.cc-bot/runtime/poll.busy-held` | busy 期间 hold 的 msg id（v0.1.20+，issue #9 修复）：JSON `{id: {ts}}`；主窗口忙时新消息进此表不 emit，下一 tick 绕过 lastTime 过滤直到 emit 成功；10min TTL 兜底清理 |
 | `.cc-bot/runtime/quota-notified.json` | 额度预警去重表（v0.1.47+）：`{five_hour:{resets_at, sent[], pending_recovered}}`，`resets_at` 当窗口键，窗口一滚自动清零 |
-| `.cc-bot/runtime/events.log` | 诊断日志（polling 架构下常规不写；破例写入场景：poll.js 连续 3 轮 stdout 不可写退出前 `BOT_ERROR`、`main-busy.lock` 过期 10min 自动清时 `BOT_WARN`） |
+| `.cc-bot/runtime/poll.cursors.json` | 多群每群游标（v0.1.51+，仅 `im.chat_ids` 非空时存在）：`{chatId: epochMs}`，poll.js emit 时推进；新群以全局 `last_processed_time` 起步 |
+| `.cc-bot/runtime/poll.reacted` | busy 期间已打过 reaction 的 msg id（v0.1.21+，防重打） |
+| `.cc-bot/runtime/permission-bridge.json` | 权限桥待决 / 近期去重表（v0.1.49+）：`{pending:[{id,deadline,tool}], recent:[]}`；poll.js 据 pending 跳过管理员的授权回复 |
+| `.cc-bot/runtime/group-bot-switch.tripwire` | 群消息触发开关词的闸门记录（issue #18）；start / stop 预检读到 60s 内的记录即拒绝 |
+| `.cc-bot/runtime/last-startup-error.json` | poll.js 上次启动失败记录（撞活 pid）；成功取锁即清 |
+| `.cc-bot/runtime/stream-<msg_id>.json` / `todo-bridge-<id>.json` | 流式卡片 / todo 镜像的任务级状态文件；任务结束不自动删（体积小，可定期清） |
+| `.cc-bot/runtime/events.log` | 诊断日志（polling 架构下常规不写；写入场景：`BOT_ERROR` / `BOT_WARN` / `BOT_INFO` 级事件 —— stdout 不可写退出、锁过期清理、额度预警、假死告警、push 回落 / 断流、超时 sweep、权限桥审计、多群某群拉取失败、未捕获异常；`im.debug=true` 再加每 tick `BOT_DEBUG`） |
 
 ## 角色与权限
 
@@ -322,7 +327,7 @@ LLM 职责收窄到「判语义匹配哪个 key」；占位符替换 / hint 摘�
 
 ## 消息处理 SOP
 
-收到 `NEW_MSG|{msg_id}|{sender}|{content}|{time}` 后：
+收到 `NEW_MSG|{msg_id}|{sender}|{content}|{time}[|FLAGS=…][|CHAT=<群id>]` 后（`time` 之后是可选的 `KEY=value` 标签。多群模式 v0.1.51+ 每条都带 `CHAT`：**回群、fetch 核对、占位都以这个群为准**；没有 `CHAT` 标签 = 单群，用 profile `im.chat_id`）：
 
 ### 最高优先级规则 0：回群 = 工具调用，宣告不算数
 
@@ -339,7 +344,7 @@ LLM 职责收窄到「判语义匹配哪个 key」；占位符替换 / hint 摘�
 
 **处理完的下一个工具调用必须是 `Edit state.json` 写 `last_processed_time = {该条 time}`**，优先级高于下条处理、部署、任何"顺手再做"。漏推会导致 catch-up 时重派，同一任务跑两遍。
 
-**格式：毫秒时间戳**（Number 或数字字符串），和 `NEW_MSG|...|<createTimeMs>` 末段一致 —— **直接取 NEW_MSG 末段那个绝对 epoch**。**不要**去转 `+chat-messages-list` 显示的 `create_time` 串：那是 lark-cli 按**主机本地时区**渲染的墙钟串（无秒），按任何**固定偏移**（如 `+0800`）转毫秒都会在非京时区主机上错位 → 与 epoch 游标比对假阴、漏回消息（issue #21）。确需某条 fetch 消息的绝对 ms 时，走 raw 端点拿飞书原始 epoch（时区无关）：`lark-cli api GET /open-apis/im/v1/messages --as bot --params '{"container_id_type":"chat","container_id":"<oc_xxx>","sort_type":"ByCreateTimeDesc","page_size":5}'` → `.data.items[].create_time`（Unix 毫秒串）。**禁止混写字符串和毫秒** — fetch 比对会假阳/假阴。
+**格式：毫秒时间戳**（Number 或数字字符串），和 `NEW_MSG|...|<createTimeMs>` 末段一致 —— **直接取 NEW_MSG 第 5 段（content 之后）那个绝对 epoch**（其后若还有 `FLAGS=` / `CHAT=` 标签不算在内）。**不要**去转 `+chat-messages-list` 显示的 `create_time` 串：那是 lark-cli 按**主机本地时区**渲染的墙钟串（无秒），按任何**固定偏移**（如 `+0800`）转毫秒都会在非京时区主机上错位 → 与 epoch 游标比对假阴、漏回消息（issue #21）。确需某条 fetch 消息的绝对 ms 时，走 raw 端点拿飞书原始 epoch（时区无关）：`lark-cli api GET /open-apis/im/v1/messages --as bot --params '{"container_id_type":"chat","container_id":"<oc_xxx>","sort_type":"ByCreateTimeDesc","page_size":5}'` → `.data.items[].create_time`（Unix 毫秒串）。**禁止混写字符串和毫秒** — fetch 比对会假阳/假阴。
 
 ### 最高优先级规则 1b：系统时间戳 vs 人类语义时间（两套时区规则，别混）
 
@@ -352,7 +357,7 @@ LLM 职责收窄到「判语义匹配哪个 key」；占位符替换 / hint 摘�
 
 ### 最高优先级规则 2：处理前先 fetch 5 条核对（fetch_before_reply）
 
-收到 NEW_MSG 前先 `lark-cli im +chat-messages-list --as bot --chat-id <chat_id> --page-size 5 --sort desc`，找未处理消息（**判定用 msg_id 是否已在 bot 回复链上方，别把显示 `create_time` 串转 epoch 跟游标比时间** —— 跨时区不可靠，见规则1），按 `create_time` 显示串升序逐条回 + 推进 state（推进值仍取该条 NEW_MSG 的绝对 epoch）。Why：Monitor 密集时可能只推最新一条，单 push 处理会漏中间关键消息（2026-04-20 实战）。
+收到 NEW_MSG 前先 `lark-cli im +chat-messages-list --as bot --chat-id <该条 NEW_MSG 的 CHAT，无则 im.chat_id> --page-size 5 --sort desc`，找未处理消息（**判定用 msg_id 是否已在 bot 回复链上方，别把显示 `create_time` 串转 epoch 跟游标比时间** —— 跨时区不可靠，见规则1），按 `create_time` 显示串升序逐条回 + 推进 state（推进值仍取该条 NEW_MSG 的绝对 epoch）。Why：Monitor 密集时可能只推最新一条，单 push 处理会漏中间关键消息（2026-04-20 实战）。
 
 **一次 fetch 覆盖多条**：Monitor 连发或前次 fetch ≤ 10s 内可复用结果。
 
@@ -372,7 +377,7 @@ LLM 职责收窄到「判语义匹配哪个 key」；占位符替换 / hint 摘�
 
 ### 权限弹窗转群（v0.1.49+，permission-bridge hook）
 
-主会话遇到不在 allow 列表的工具时 CC 弹「允许 / 拒绝」框 —— 这是 harness 层，LLM 感知不到也不该处理。`runtime/permission-bridge.js`（`PermissionRequest` hook，setup §8.7 注册）按 profile `permission_bridge` 自动转群：`notify` 单向提示 / `approve` 管理员回「允许 <id>」「拒绝 <id>」代答，超时交回终端。**LLM 零参与**；管理员那条回复已被 hook 写进 `poll.emitted`，不会再以 NEW_MSG 出现。群里有人问「为什么 bot 卡住了」而 `events.log` 有 `permission-bridge|ask` 无后续 → 答「等终端 / 管理员授权」即可。
+主会话遇到不在 allow 列表的工具时 CC 弹「允许 / 拒绝」框 —— 这是 harness 层，LLM 感知不到也不该处理。`runtime/permission-bridge.js`（`PermissionRequest` hook，setup §8.7 注册）按 profile `permission_bridge` 自动转群：`notify` 单向提示 / `approve` 管理员回「允许 <id>」「拒绝 <id>」代答，超时交回终端。**LLM 零参与**；管理员那条回复由 hook 写进 `poll.emitted`，poll.js 自己也认得待决中的「允许 / 拒绝 <id>」并跳过（push 模式 / tick 竞态也不会漏），不会再以 NEW_MSG 出现；泛用词 ok / yes / 1 必须带 #id 才算授权。多群时权限桥只走主群 `im.chat_id`。群里有人问「为什么 bot 卡住了」而 `events.log` 有 `permission-bridge|ask` 无后续 → 答「等终端 / 管理员授权」即可。
 
 ### 完整流程
 
@@ -391,7 +396,7 @@ LLM 职责收窄到「判语义匹配哪个 key」；占位符替换 / hint 摘�
    - member 触发"仅管理员"操作 → 拒绝
    - 其他危险操作的非 admin → 写 `pending_confirm`（15 min 超时）
    - `lark-cli im +messages-reply --as bot --message-id <msg_id>` 回复（依赖 reply 引用上下文，正文不具名 — 见 §角色与权限 §群里称呼）
-8. **推进 state.json**：Edit `last_processed_time = time`（`time` = NEW_MSG 末段的 `createTimeMs` 毫秒戳，见 §最高优先级规则 1 格式规范）
+8. **推进 state.json**：Edit `last_processed_time = time`（`time` = NEW_MSG 第 5 段的 `createTimeMs` 毫秒戳，见 §最高优先级规则 1 格式规范；多群模式下 poll.js 另有每群游标 `poll.cursors.json` 自动推进，本步照旧做即可）
 
 ### Bug 报告处理节奏（多 bug 密集会话）
 
@@ -582,7 +587,7 @@ fan-out 任务（`subagent_count > 1`）：等**所有**子 agent 完成再调 c
 
 **机制**（poll.js 层拦截，主会话无感知）：
 
-1. CC hook 注册在 `~/.claude/settings.json`（由 `/cc-bot:setup` step 9 幂等注入）：
+1. CC hook 注册在 `~/.claude/settings.json`（由 `/cc-bot:setup` Stage E step 8 幂等注入）：
    - `UserPromptSubmit` → `node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js lock` 写 `.cc-bot/runtime/main-busy.lock`
    - `Stop` → `node ${CLAUDE_PLUGIN_ROOT}/runtime/main-busy.js unlock` 删锁 + 删通知标志
 2. poll.js 每 tick 开头 `checkMainBusy()` 返回 `{ busy, degraded, lockTs }`：

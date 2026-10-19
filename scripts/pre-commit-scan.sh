@@ -30,8 +30,9 @@ ADDED=$(echo "$DIFF" | grep -E '^\+[^+]' || true)
 FAIL=0
 
 # 规则 1: 飞书真实 ID
-LARK_ID_HITS=$(echo "$ADDED" | grep -oE '(cli|ou|oc|om)_[0-9a-f]{14,}' || true)
-LARK_ID_REAL=$(echo "$LARK_ID_HITS" | grep -vE '_x{14,}|_[0-9a-f]{0,13}$' || true)
+# 与 runtime/redact.js 对齐：真实 ID 不只是小写 hex（om_x1... / on_ union id / 大写），占位符（全 x）放行
+LARK_ID_HITS=$(echo "$ADDED" | grep -oE '(cli|ou|oc|om|on)_[0-9A-Za-z]{14,}' || true)
+LARK_ID_REAL=$(echo "$LARK_ID_HITS" | grep -vE '_[xX]{14,}$' || true)
 if [ -n "$LARK_ID_REAL" ]; then
   echo "❌ pre-commit 阻止：检测到疑似真实飞书 ID"
   echo "$LARK_ID_REAL" | sort -u | head -5 | sed 's/^/     /'

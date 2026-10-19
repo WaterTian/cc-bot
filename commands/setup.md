@@ -360,6 +360,7 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
    - `display_name`: same
    - `im.type`: **IM_TYPE** from Stage 0 (`lark` 或 `slack`)
    - `im.chat_id`: **CHAT_ID**
+   - `im.chat_ids`: `[]`（v0.1.51+ 多群：要同时服务多个群时手动填其它群的 chat_id 数组；主群仍是 `im.chat_id`，上下线通知 / 权限桥走主群，各群消息独立游标互不丢）
    - `im.chat_name`: **CHAT_NAME**
    - `project.root`: absolute path of current directory (forward slashes, e.g. `D:/Projects/foo`)
    - `paths.bot_temp_abs`: `{project.root}/.cc-bot/bot_temp` (forward slashes, e.g. `D:/Projects/foo/.cc-bot/bot_temp`)
@@ -391,7 +392,7 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
    ```json
    {"last_processed_time":"<current-unix-ms>","pending_confirm":null,"paused":true,"monitor_task_id":null}
    ```
-   Use `Date.now()` (JS) or `date +%s%3N` (bash) to get the value.
+   Use `node -e 'console.log(Date.now())'` to get the value（`date +%s%3N` 只有 GNU date 支持，macOS BSD date 会打出字面 `3N`）.
 6. Append to `./.gitignore` (create if missing, skip rules that already exist):
    ```
    # cc-bot

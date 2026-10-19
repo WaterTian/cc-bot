@@ -47,8 +47,14 @@ const POLL_MS_BY_IM = { lark: 3000, slack: 15000 }  // slack conversations.histo
 const PAGE_SIZE = 15
 const SUMMARY_MAX = 400
 
-const ALLOW_WORDS = new Set(['允许', '同意', '批准', '放行', 'allow', 'approve', 'approved', 'yes', 'y', 'ok', '1'])
-const DENY_WORDS = new Set(['拒绝', '不允许', '不行', '否', 'deny', 'reject', 'rejected', 'no', 'n', '2'])
+// 明确的授权词：单独出现也算（只有一个待决时可省 #id）
+const ALLOW_WORDS = new Set(['允许', '同意', '批准', '放行', 'allow', 'approve', 'approved'])
+const DENY_WORDS = new Set(['拒绝', '不允许', '不行', 'deny', 'reject', 'rejected'])
+// 泛用应答词：只有显式带 #id 才算数 —— 管理员在群里给同事回个「ok」「1」「好」不能变成给 CC 放行（v0.1.51 收紧）
+const GENERIC_ALLOW = new Set(['yes', 'y', 'ok', '1', '好', '可以', '行'])
+const GENERIC_DENY = new Set(['no', 'n', '2', '否', '不'])
+const isAllowWord = (w) => ALLOW_WORDS.has(w) || GENERIC_ALLOW.has(w)
+const isDenyWord = (w) => DENY_WORDS.has(w) || GENERIC_DENY.has(w)
 
 // ========== 小工具 ==========
 
@@ -99,7 +105,7 @@ function shortId() {
   // 4 位小写字母数字；避开所有关键词（deny 等 4 字词）防跟回复关键词撞车
   for (;;) {
     const id = crypto.randomBytes(3).toString('base64url').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4)
-    if (id.length === 4 && !ALLOW_WORDS.has(id) && !DENY_WORDS.has(id)) return id
+    if (id.length === 4 && !isAllowWord(id) && !isDenyWord(id)) return id
   }
 }
 
@@ -121,9 +127,15 @@ function admins(profile) {
 // 把 tool_input 压成一行人话；长命令保留前几行；项目内路径显示为相对路径（群里看得懂、也短）
 function summarize(toolName, toolInput, root) {
   const ti = toolInput || {}
+  // 统一成正斜杠绝对路径再比（Windows 下 cwd 是反斜杠、tool_input 常是正斜杠，直接 startsWith 对不上会把带用户名的绝对路径发群）
+  const norm = (p) => path.resolve(String(p || '')).replace(/\\/g, '/').replace(/\/+$/, '')
+  const rootN = root ? norm(root) : ''
   const rel = (f) => {
     const x = String(f || '')
-    if (root && x.startsWith(root + path.sep)) return './' + path.relative(root, x).split(path.sep).join('/')
+    if (!x || !rootN) return x
+    const xn = norm(x)
+    if (xn === rootN) return './'
+    if (xn.startsWith(rootN + '/')) return './' + xn.slice(rootN.length + 1)
     return x
   }
   let s = ''
@@ -132,7 +144,13 @@ function summarize(toolName, toolInput, root) {
   else if (toolName === 'WebFetch') s = String(ti.url || '')
   else if (toolName === 'WebSearch') s = String(ti.query || '')
   else if (toolName === 'Glob' || toolName === 'Grep') s = `${ti.pattern || ''} ${ti.path || ''}`.trim()
-  if (!s) { try { s = JSON.stringify(ti) } catch { s = String(ti) } }
+  if (!s) {
+    // 未知工具（含 mcp__*）：只摘白名单字段，别把整段 tool_input（可能带 cookie / token 等非标准键）贴进群
+    const KNOWN = ['command', 'file_path', 'notebook_path', 'path', 'url', 'query', 'pattern', 'description', 'prompt', 'title']
+    const parts = []
+    for (const k of KNOWN) if (ti[k] !== undefined && ti[k] !== null && ti[k] !== '') parts.push(`${k}=${String(ti[k]).slice(0, 120)}`)
+    s = parts.length ? parts.join(' · ') : `(fields: ${Object.keys(ti).slice(0, 8).join(', ') || 'none'})`
+  }
   const lines = s.split(/\r?\n/)
   if (lines.length > 6) s = lines.slice(0, 6).join('\n') + `\n… (+${lines.length - 6} lines)`
   if (s.length > SUMMARY_MAX) s = s.slice(0, SUMMARY_MAX) + '…'
@@ -170,15 +188,18 @@ function parseReply(content, myId, solePending) {
   if (tokens.length === 0 || tokens.length > 2) return null
   let word = null, id = null
   for (const tok of tokens) {
-    if (ALLOW_WORDS.has(tok) || DENY_WORDS.has(tok)) { if (word) return null; word = tok; continue }
+    if (isAllowWord(tok) || isDenyWord(tok)) { if (word) return null; word = tok; continue }
     const m = /^#?([a-z0-9]{4})$/.exec(tok)
     if (m) { if (id) return null; id = m[1]; continue }
     return null
   }
   if (!word) return null
   if (id && id !== myId) return null
-  if (!id && !solePending) return null
-  return ALLOW_WORDS.has(word) ? 'allow' : 'deny'
+  if (!id) {
+    if (GENERIC_ALLOW.has(word) || GENERIC_DENY.has(word)) return null  // 泛用词必须带 #id
+    if (!solePending) return null
+  }
+  return isAllowWord(word) ? 'allow' : 'deny'
 }
 
 function emitDecision(behavior, message) {
@@ -360,15 +381,22 @@ async function probeCmd(args) {
   console.log(JSON.stringify({ ok: true, ...r }))
 }
 
-const args = parseArgs(process.argv.slice(2))
-const sub = args._[0]
-;(async () => {
-  try {
-    if (sub === 'status') statusCmd(args)
-    else if (sub === 'probe') await probeCmd(args)
-    else await hookMain()
-  } catch {
-    // hook 崩溃会拖累主会话；一律静默 exit 0（不表态 = 权限流程原样继续）
-  }
-  process.exit(sub ? (process.exitCode || 0) : 0)
-})()
+// poll.js 复用 parseReply 判「管理员这条是不是给权限桥的回复」（push 模式 / tick 竞态下 hook 来不及先吃掉，poll.js 侧也要认得）
+module.exports = { parseReply, resolveConfig, ALLOW_WORDS, DENY_WORDS, GENERIC_ALLOW, GENERIC_DENY }
+
+if (require.main === module) {
+  const args = parseArgs(process.argv.slice(2))
+  const sub = args._[0]
+  ;(async () => {
+    try {
+      if (sub === 'status') statusCmd(args)
+      else if (sub === 'probe') await probeCmd(args)
+      else await hookMain()
+    } catch {
+      // hook 崩溃会拖累主会话；一律静默 exit 0（不表态 = 权限流程原样继续）
+    }
+    // 先把 stdout（hook 决策 JSON）冲干净再退出：pipe 在 macOS 上是异步写，直接 exit 可能丢决策
+    const code = sub ? (process.exitCode || 0) : 0
+    process.stdout.write('', () => process.exit(code))
+  })()
+}

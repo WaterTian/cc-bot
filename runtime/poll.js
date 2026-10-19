@@ -11,7 +11,8 @@
 //
 // Profile：<project>/.cc-bot/profiles/active.json
 //   {
-//     "im": { "type": "lark", "bot_app_id": "...", "chat_id": "...", "transport": "" },
+//     "im": { "type": "lark", "bot_app_id": "...", "chat_id": "...", "chat_ids": [], "transport": "" },
+//                                   // chat_ids（v0.1.51+，issue #24）：追加监听的群；chat_id 仍是主群
 //     "polling_interval_ms": 60000,        // 可选（默认 60000 ms = 60s，v0.1.46+ 从 10s 调回 60s 省租户配额，issue #23）
 //     "push_reconcile_interval_ms": 300000 // 可选（仅 im.transport='push' 时生效：校对轮询间隔，默认 5min）
 //   }
@@ -39,6 +40,7 @@ const dispatchModule = require('./dispatch')
 const botSwitchDetect = require('./bot-switch-detect')
 const quotaAlert = require('./quota-alert')
 const stallAlert = require('./stall-alert')
+const permissionBridge = require('./permission-bridge')  // 只用 parseReply（模块已加 require.main 守卫，不会触发 hook 主流程）
 const { createAdapter } = require('../adapters/factory')
 
 // ========== 参数解析 ==========
@@ -91,7 +93,14 @@ try {
   process.exit(1)
 }
 
-const CHAT_ID = im.chat_id
+// 多群（v0.1.51+，issue #24）：im.chat_ids 追加监听群；im.chat_id 仍是主群（上下线通知 / 权限桥 / 兜底目标）。
+// 单群时一切行为与历来一致：不建游标文件、envelope 不带 CHAT 标签。
+const PRIMARY_CHAT_ID = String(im.chat_id || (Array.isArray(im.chat_ids) ? im.chat_ids[0] : '') || '').trim()
+const CHAT_IDS = [...new Set([PRIMARY_CHAT_ID, ...(Array.isArray(im.chat_ids) ? im.chat_ids : [])]
+  .map(x => String(x || '').trim()).filter(Boolean))]
+const MULTI_CHAT = CHAT_IDS.length > 1
+const CHAT_ID = PRIMARY_CHAT_ID  // 旧名保留给单群路径
+const ADMIN_IDS = Array.isArray(profile.members && profile.members.admin_open_ids) ? profile.members.admin_open_ids.map(String) : []
 const BOT_OPEN_ID = im.bot_open_id || im.bot_user_id || ''  // lark 用 bot_open_id / slack 用 bot_user_id；未配时保守 — 任何 @ 一律 skip
 const DEBUG = !!(im && im.debug)  // profile.im.debug=true 时启用 BOT_DEBUG 诊断日志
 // locale 决策：profile 显式优先 → 按 IM 类型默认（lark=zh-CN / slack=en-US）→ 兜底 zh-CN
@@ -100,10 +109,12 @@ const DEFAULT_LOCALE_BY_IM = { lark: 'zh-CN', slack: 'en-US' }
 const LOCALE = im.locale || DEFAULT_LOCALE_BY_IM[im.type] || 'zh-CN'
 // 默认 60s（v0.1.46+，issue #23）：飞书基础版租户级共享 1M 调用/月，10s 空转（经记忆化 1 计费/tick）
 // ≈259k/月单 bot 就吃掉 1/4 租户配额；60s 降到 ≈43k/月。profile 显式设 polling_interval_ms 覆盖此默认。
-const CHECK_INTERVAL_MS = Number(profile.polling_interval_ms) || 60 * 1000
+// 下限 10s / 30s：配错成 100ms 会把租户配额烧光；测试用 CC_BOT_DEV_FAST=1 放开
+const MIN_INTERVAL_MS = process.env.CC_BOT_DEV_FAST ? 0 : 10 * 1000
+const CHECK_INTERVAL_MS = Math.max(MIN_INTERVAL_MS, Number(profile.polling_interval_ms) || 60 * 1000)
 // lark push 模式的校对轮询间隔：事件流在代理 / 弱网下可能静默断流（历史坑），低频拉一次兜底，
 // 每 tick 1 计费调用；默认 5min ≈ 288 calls/day（polling@60s 的 1/5）。profile.push_reconcile_interval_ms 覆盖。
-const RECONCILE_INTERVAL_MS = Number(profile.push_reconcile_interval_ms) || 5 * 60 * 1000
+const RECONCILE_INTERVAL_MS = Math.max(MIN_INTERVAL_MS * 3, Number(profile.push_reconcile_interval_ms) || 5 * 60 * 1000)
 let tickIntervalMs = CHECK_INTERVAL_MS   // 当前 tick 间隔：polling=CHECK_INTERVAL_MS / lark push=RECONCILE_INTERVAL_MS
 let tickTimer = null
 let tickLoopStarted = false
@@ -112,8 +123,7 @@ const PAGE_SIZE = 10
 // 页太小时长 hold（额度耗尽可达数小时）里较早的消息会滚出拉取窗口永久丢。
 // 同样是 1 次计费调用，加页不加成本（issue #23 口径）。
 const HOLD_PAGE_SIZE = 30
-const QUOTA_CHECK_INTERVAL_MS = 60 * 1000  // push 模式没有 tick 循环，额度检查单挂定时器
-const STALL_CHECK_INTERVAL_MS = 60 * 1000  // slack push 同上：假死判定单挂定时器（lark push 由校对 tick 顺带做）
+const MAINTENANCE_INTERVAL_MS = 60 * 1000  // slack push 没有 tick 循环：额度检查 / 超时 sweep / 假死判定 合挂一个维护定时器（lark push 由校对 tick 顺带做）
 // 主会话假死告警（v0.1.50+，issue #4）：判定 / 文案 / 节流全在 runtime/stall-alert.js，poll.js 只负责发 + 记账
 const stall = stallAlert.createTracker({ runtimeDir: RUNTIME_DIR, profile, locale: LOCALE })
 const EMITTED_MAX = 200
@@ -138,7 +148,7 @@ const MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS = 5 * 60 * 1000  // 5min — �
 // held 消息就被 <= lastTime 过滤永久丢失。新路径用 in-memory map + JSON 文件持久化，emit 成功后才移除。
 const BUSY_HELD_FILE = path.join(RUNTIME_DIR, 'poll.busy-held')
 const BUSY_HELD_TTL_MS = 10 * 60 * 1000  // 10min 兜底清理（防孤儿）
-const busyHeld = new Map()  // id -> { ts }
+const busyHeld = new Map()  // id -> { ts, chatId }
 
 // reaction ack（v0.1.21，issue #12）：mainBusy 期间每条新消息打 emoji reaction 作为"看见了"信号。
 // 仅装饰性增强 — 任何失败不影响 emit / busy-held / 文本占位。`busy_reaction: false` 完全 opt-out。
@@ -243,7 +253,8 @@ let alertedOnce = false
 
 // 进程内状态：上次发占位对应的 lock.ts。用于普通态 per-lock dedup（issue #7：长 lock + 持续新消息时严格 5min 周期发占位刷屏）。
 // 不落盘：poll.js 重启后首条消息按"全新"处理，行为可预期；也少一个跨进程同步坑。
-let lastLockTsPlaceholdered = 0
+const lastLockTsPlaceholdered = new Map()   // chatId -> lockTs（多群各自 dedup，issue #24）
+const lastPlaceholderSentAt = new Map()     // chatId -> ms（5min 节流按群计；首次回落读 flag 文件 mtime 兼容重启）
 
 // ========== Defense 1: PID lockfile 单例锁 ==========
 
@@ -322,6 +333,63 @@ function logDebug(line) {
   logEvent(`BOT_DEBUG|${line}`)
 }
 
+// ========== 多群游标（v0.1.51+，issue #24）==========
+//
+// 单群：沿用 state.last_processed_time（主会话推进）作时间游标，行为与历来一致。
+// 多群：每群独立游标 poll.cursors.json = { chatId: epochMs }，由 poll.js 在 emit 时推进。
+//   不能共用全局游标：A 群新消息把游标推高后，B 群稍早但刚拉到的消息会被 `createTimeMs <= lastTime`
+//   过滤永久丢（跨群交叉到达是常态，issue #24 实测丢了 3 条）。
+//   新群首次出现（无游标）用全局 last_processed_time 起步避免回放历史；之后只跟自己的 emit 走，不再受全局游标影响。
+const CURSORS_FILE = path.join(RUNTIME_DIR, 'poll.cursors.json')
+const cursors = new Map()  // chatId -> epochMs（仅 MULTI_CHAT 使用）
+
+function loadCursors() {
+  if (!MULTI_CHAT) return
+  try {
+    const obj = JSON.parse(fs.readFileSync(CURSORS_FILE, 'utf8'))
+    for (const [k, v] of Object.entries(obj || {})) { const n = Number(v); if (Number.isFinite(n) && n > 0) cursors.set(k, n) }
+  } catch {}
+  const floor = Number(readState().last_processed_time || 0)
+  let dirty = false
+  for (const c of CHAT_IDS) if (!cursors.has(c)) { cursors.set(c, floor); dirty = true }
+  if (dirty) persistCursors()
+}
+
+function persistCursors() {
+  try { atomicWriteSync(CURSORS_FILE, JSON.stringify(Object.fromEntries(cursors))) }
+  catch (e) { logEvent(`BOT_WARN|poll.js|cursors-write-failed|${(e && e.message) || e}`) }
+}
+
+function cursorFor(chatId, state) {
+  const global = Number(state.last_processed_time || 0)
+  if (!MULTI_CHAT) return global
+  const c = cursors.get(chatId)
+  return Number.isFinite(c) ? c : global
+}
+
+function advanceCursor(chatId, ms) {
+  if (!MULTI_CHAT || !(ms > 0)) return
+  if ((cursors.get(chatId) || 0) >= ms) return
+  cursors.set(chatId, ms)
+  persistCursors()
+}
+
+// 权限桥待决期间，管理员的「允许 / 拒绝 <id>」是给 hook 的，不是新任务。hook 自己会把它写进 poll.emitted，
+// 但 push 模式是即时 emit、polling 也有 60s tick 竞态，poll.js 侧必须也认得并先行跳过（README 承诺「不会被当新任务」）。
+function readPermissionPending() {
+  try {
+    const st = JSON.parse(fs.readFileSync(path.join(RUNTIME_DIR, 'permission-bridge.json'), 'utf8'))
+    const now = Date.now()
+    return (st && Array.isArray(st.pending) ? st.pending : []).filter(p => p && p.id && Number(p.deadline || 0) > now - 60 * 1000)
+  } catch { return [] }
+}
+function isPermissionReply(m, pending) {
+  if (!pending || pending.length === 0 || !m || m.senderType !== 'user') return false
+  if (!ADMIN_IDS.includes(String(m.senderId))) return false
+  const sole = pending.length === 1
+  return pending.some(p => !!permissionBridge.parseReply(m.content, p.id, sole))
+}
+
 // ========== busy-held 持久化 helpers（v0.1.20）==========
 
 function loadBusyHeld() {
@@ -383,7 +451,7 @@ async function tryReactBusy(m) {
     const r = await adapter.addReaction({
       messageId: m.id,
       emoji: BUSY_REACTION,
-      chatId: CHAT_ID,  // slack 需要；lark 忽略
+      chatId: m.chatId || PRIMARY_CHAT_ID,  // slack 需要；lark 忽略
     })
     if (r && r.ok) {
       reacted.add(m.id)
@@ -469,14 +537,24 @@ function appendEmitted(msgIds) {
   } catch {}
 }
 
-async function pollMessages(pageSize = PAGE_SIZE) {
+// NEW_MSG 已经打出去了，去重表写不进去（磁盘满 / 权限）必须留痕，否则同一条会每 tick 重发且 events.log 一片空白
+function safeAppendEmitted(ids) {
+  try { appendEmitted(ids) } catch (e) { logEvent(`BOT_ERROR|poll.js|emitted-write-failed|${(e && e.message) || e}|ids=${ids.join(',')}`) }
+}
+
+// 逐群拉取。单群失败就是整体失败（调用方按 consecutiveFailures 告警）；多群时某群失败只记 events.log，不影响其它群。
+const chatFailStreak = new Map()  // chatId -> 连续失败次数
+async function pollChat(chatId, pageSize = PAGE_SIZE) {
   try {
-    const msgs = await adapter.listRecentMessages({ chatId: CHAT_ID, pageSize })
-    consecutiveFailures = 0
-    alertedOnce = false
+    const msgs = await adapter.listRecentMessages({ chatId, pageSize })
+    const prev = chatFailStreak.get(chatId) || 0
+    if (prev > 0 && MULTI_CHAT) logEvent(`BOT_INFO|poll.js|poll-chat-recovered|chat=${chatId}|after=${prev}`)
+    chatFailStreak.set(chatId, 0)
     return msgs
-  } catch {
-    consecutiveFailures++
+  } catch (e) {
+    const n = (chatFailStreak.get(chatId) || 0) + 1
+    chatFailStreak.set(chatId, n)
+    if (MULTI_CHAT && (n === 1 || n % 10 === 0)) logEvent(`BOT_WARN|poll.js|poll-chat-failed|chat=${chatId}|streak=${n}|${String((e && e.message) || e).slice(0, 200)}`)
     return null
   }
 }
@@ -514,8 +592,10 @@ function emitNewMsg(m) {
   } catch {
     // 检测失败不阻 emit；最坏退到 layer 2/3 防御
   }
-  console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}${flags}`)
-  try { stall.noteEmit(m.id) } catch {}  // 假死告警计时起点（issue #4）
+  // 多群时追加 CHAT 标签（主会话据此定回群 / fetch 的目标群；单群不带，envelope 与历来一致）
+  const chatTag = MULTI_CHAT ? `|CHAT=${m.chatId || PRIMARY_CHAT_ID}` : ''
+  console.log(`NEW_MSG|${m.id}|${m.senderId}|${m.content}|${m.createTimeMs}${flags}${chatTag}`)
+  try { stall.noteEmit(m.id, m.chatId || PRIMARY_CHAT_ID) } catch {}  // 假死告警计时起点（issue #4）
 }
 
 // ========== 主会话优先级：锁检测 + 占位 ==========
@@ -573,27 +653,26 @@ function checkMainBusy() {
 //   ② degraded（主会话疑似卡死）→ 5min 周期心跳，避免长阻塞后期纯静默（v0.1.15 设计）
 //   ③ 普通忙碌 → per-lock dedup：同一 lock acquisition 至多发 1 条
 //      + 全局 5min 节流兜底，防 hook 高频 lock churn（#6 多 turn 密集）击穿 per-lock dedup
-async function sendMainBusyPlaceholder({ degraded = false, lockTs = 0 } = {}) {
+async function sendMainBusyPlaceholder({ degraded = false, lockTs = 0, chatId = PRIMARY_CHAT_ID } = {}) {
   if (profile && profile.im && profile.im.busy_placeholder === false) return
 
+  // 上次发占位时刻：进程内按群记；进程刚起没记录时回落 flag 文件 mtime（跨重启节流，单群语义与历来一致）
+  let lastSent = lastPlaceholderSentAt.get(chatId) || 0
+  if (!lastSent) { try { lastSent = fs.statSync(MAIN_BUSY_NOTIFIED_FLAG).mtimeMs } catch {} }
+
   if (degraded) {
-    try {
-      const lastSent = fs.statSync(MAIN_BUSY_NOTIFIED_FLAG).mtimeMs
-      if (Date.now() - lastSent < MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS) return
-    } catch {}
+    if (Date.now() - lastSent < MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS) return
   } else {
     // per-lock dedup：lockTs 相同视为同一 lock acquisition，已发过就不再发（issue #7 根治）
-    if (lockTs > 0 && lockTs === lastLockTsPlaceholdered) return
+    if (lockTs > 0 && lockTs === lastLockTsPlaceholdered.get(chatId)) return
     // 全局节流：跨 lock 也限速 5min（issue #6 防多 turn 高频）
-    try {
-      const lastSent = fs.statSync(MAIN_BUSY_NOTIFIED_FLAG).mtimeMs
-      if (Date.now() - lastSent < MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS) return
-    } catch {}
-    lastLockTsPlaceholdered = lockTs
+    if (Date.now() - lastSent < MAIN_BUSY_DEGRADED_PLACEHOLDER_INTERVAL_MS) return
+    lastLockTsPlaceholdered.set(chatId, lockTs)
   }
 
   try {
-    await adapter.sendText({ chatId: CHAT_ID, text: pickBusyPlaceholder() })
+    await adapter.sendText({ chatId, text: pickBusyPlaceholder() })
+    lastPlaceholderSentAt.set(chatId, Date.now())
     fs.writeFileSync(MAIN_BUSY_NOTIFIED_FLAG, String(Date.now()))
   } catch {
     // 占位发送失败静默 — 主业务不受影响
@@ -626,13 +705,16 @@ async function checkQuotaAndNotify({ holdCapable = true } = {}) {
     const text = res.level === 'exhausted' && !hold
       ? quotaAlert.render({ ...res, hold: false })
       : res.text
-    try {
-      await adapter.sendText({ chatId: CHAT_ID, text })
+    // 额度是全局的，每个群都要知道；任一群发成功就记账（失败的群下 tick 不再补 —— 宁可少发一群也别刷屏）
+    let sentAny = false
+    for (const c of CHAT_IDS) {
+      try { await adapter.sendText({ chatId: c, text }); sentAny = true }
+      catch (e) { logEvent(`BOT_WARN|poll.js|quota-alert-send-failed|${res.level}|chat=${c}|${(e && e.message) || e}`) }
+    }
+    if (sentAny) {
       // 发成功才记账；失败不记 → 下一 tick 自动重试（不会永久漏报）
       quotaAlert.record({ project: PROJECT_ROOT, level: res.level })
       logEvent(`BOT_INFO|poll.js|quota-alert|${res.level}|used=${Math.round(res.used)}%|resets=${res.resetsAt}`)
-    } catch (e) {
-      logEvent(`BOT_WARN|poll.js|quota-alert-send-failed|${res.level}|${(e && e.message) || e}`)
     }
   }
   logDebug(`quota|used=${Math.round(res.used)}%|level=${res.level || 'none'}|hold=${hold}`)
@@ -656,7 +738,7 @@ async function runStallCheck({ mainBusy = false, botMsgMaxTime = 0 } = {}) {
   if (!d) return
   if (d.action === 'none') { if (d.log) logEvent(d.log); return }
   try {
-    await adapter.sendText({ chatId: CHAT_ID, text: d.text })
+    await adapter.sendText({ chatId: d.chatId || PRIMARY_CHAT_ID, text: d.text })
     stall.commit(d)
     logEvent(d.log)
     if (d.action === 'alert') console.log(d.log)
@@ -676,6 +758,127 @@ async function tick() {
 
   // v0.1.37+ 长任务 sweep — 内部按 profile.dispatch.max_turn_time_mins 决定是否真扫；
   // 默认 0=不启用直接返回，无开销。inline 调用避开 spawn node 进程的成本，try 兜住任何异常。
+  runSweep()
+
+  pruneBusyHeld()
+  const { busy: mainBusy, degraded, lockTs } = checkMainBusy()
+  // 额度耗尽与主会话忙碌走同一条 hold 路径：不 emit、进 busy-held、恢复后补推
+  // hold 能力只有纯 polling 才有（下一 tick 能重 fetch）；push 模式推来的消息不 emit 即永久丢
+  const { hold: quotaHold } = await checkQuotaAndNotify({ holdCapable: IM_MODE === 'polling' })
+  const holdMsgs = mainBusy || quotaHold
+  // hold 中、或 hold 刚结束还有 held 没补发 → 都用大页：否则 hold 结束第一 tick 回到 10 条，
+  // 较早的 held 消息滚出窗口，只能等 10min TTL 被 prune 掉 —— issue #9 那种静默丢失
+  const pageSize = (holdMsgs || busyHeld.size > 0) ? HOLD_PAGE_SIZE : PAGE_SIZE
+
+  // 逐群拉取（v0.1.51+ 多群，issue #24）；单群就是一轮
+  const batches = []
+  for (const chatId of CHAT_IDS) {
+    const msgs = await pollChat(chatId, pageSize)
+    if (msgs !== null) batches.push({ chatId, msgs })
+  }
+  if (batches.length === 0) {
+    consecutiveFailures++
+    if (consecutiveFailures >= FAIL_ALERT_THRESHOLD && !alertedOnce) {
+      console.log(`BOT_ERROR|poll.js|adapter 连续失败 ${consecutiveFailures} 次，可能认证过期或网络故障`)
+      alertedOnce = true
+    }
+    await runStallCheck({ mainBusy })  // 拉取失败不影响本地信号判定
+    return
+  }
+  consecutiveFailures = 0
+  alertedOnce = false
+
+  const emitted = readEmitted()
+  const pendingPerm = readPermissionPending()
+  const newlyEmitted = []
+  const busySeenChats = new Set()
+  let busyHeldDirty = false
+  let botMsgMaxTime = 0  // 本 tick 看到的 bot 自己发言的最大 createTimeMs（假死告警的「已接手」信号之一）
+  let total = 0
+  // 过滤理由分布（debug 用）
+  const reasons = { id: 0, emitted: 0, bot: 0, type: 0, time: 0, atOthers: 0, permReply: 0, held: 0, emitNow: 0, lateRelease: 0 }
+
+  for (const { chatId, msgs } of batches) {
+    total += msgs.length
+    if (msgs.length === 0) continue
+    const lastTime = cursorFor(chatId, state)
+    let maxDoneCt = 0  // 本群本 tick 已处理（emit / 视为已处理）的最大 createTimeMs → 多群游标推进值
+    const done = (m) => { if (m.createTimeMs > maxDoneCt) maxDoneCt = m.createTimeMs }
+    // adapter 返回降序，翻成升序处理
+    const asc = [...msgs].reverse()
+
+    for (const m of asc) {
+      if (!m.id) { reasons.id++; continue }
+      if (!m.chatId) m.chatId = chatId
+      if (emitted.has(m.id)) {
+        reasons.emitted++
+        // 已被别的路径消费（push 先到 / permission-bridge 吃掉管理员回复）→ 不必再 hold
+        if (busyHeld.has(m.id)) { busyHeld.delete(m.id); busyHeldDirty = true }
+        continue
+      }
+      if (m.senderType === 'bot') {
+        reasons.bot++
+        if (m.createTimeMs > botMsgMaxTime) botMsgMaxTime = m.createTimeMs
+        continue
+      }
+      if (!VALID_TYPES.has(m.type)) { reasons.type++; continue }
+
+      // busy-held：在 hold 列表里的消息绕过 lastTime 过滤（issue #9）
+      const isHeld = busyHeld.has(m.id)
+      if (!isHeld && (!m.createTimeMs || m.createTimeMs <= lastTime)) { reasons.time++; continue }
+
+      // @他人过滤：视为已处理（append emitted），下次不再扫
+      if (isAtOthers(m.mentions)) {
+        reasons.atOthers++
+        newlyEmitted.push(m.id); done(m)
+        if (isHeld) { busyHeld.delete(m.id); busyHeldDirty = true }
+        continue
+      }
+      // 权限桥待决中的管理员回复：是给 hook 的，不当新任务
+      if (isPermissionReply(m, pendingPerm)) {
+        reasons.permReply++
+        newlyEmitted.push(m.id); done(m)
+        if (isHeld) { busyHeld.delete(m.id); busyHeldDirty = true }
+        continue
+      }
+
+      if (holdMsgs) {
+        // 主窗口忙 / 额度耗尽：不 emit、不记 emitted；记 busy-held（持久化，下次绕过 time 过滤直到 emit 成功）
+        busySeenChats.add(chatId)
+        if (!isHeld) {
+          busyHeld.set(m.id, { ts: Date.now(), chatId })
+          busyHeldDirty = true
+          reasons.held++
+          // reaction ack — 装饰性，失败不影响 hold/emit 链路（issue #12）
+          await tryReactBusy(m)
+        }
+        continue
+      }
+
+      // busy 已退出 + 该消息曾被 held：emit 之；若 createTime < lastTime 说明 main 通过 fetch-before-reply 越过了 state，
+      // 重新 emit 可能导致主会话重复回复 — 写 BOT_WARN 让运维可见（main 端 SOP 应做 dedup，见 SKILL）
+      if (isHeld && m.createTimeMs <= lastTime) {
+        logEvent(`BOT_WARN|poll.js|busy-held-late-release|msg=${m.id}|ct=${m.createTimeMs}|lastTime=${lastTime}|main 可能已 fetch 处理过；重新 emit，需主会话端 dedup`)
+        reasons.lateRelease++
+      }
+
+      emitNewMsg(m)
+      newlyEmitted.push(m.id); done(m)
+      reasons.emitNow++
+      if (isHeld) { busyHeld.delete(m.id); busyHeldDirty = true }
+    }
+    advanceCursor(chatId, maxDoneCt)
+  }
+
+  if (busyHeldDirty) persistBusyHeld()
+  if (mainBusy) for (const c of busySeenChats) await sendMainBusyPlaceholder({ degraded, lockTs, chatId: c })
+  if (newlyEmitted.length > 0) safeAppendEmitted(newlyEmitted)
+  logDebug(`tick|chats=${batches.length}/${CHAT_IDS.length}|lastTime=${state.last_processed_time}|msgs=${total}|busy=${mainBusy}|quotaHold=${quotaHold}|held=${busyHeld.size}|reasons=${JSON.stringify(reasons)}`)
+  await runStallCheck({ mainBusy, botMsgMaxTime })
+}
+
+// dispatch 超时回收（v0.1.37+）：polling tick 与 slack 维护定时器共用
+function runSweep() {
   try {
     const sweepRes = dispatchModule.sweep({ project: PROJECT_ROOT })
     if (sweepRes && sweepRes.swept > 0) {
@@ -684,128 +887,46 @@ async function tick() {
   } catch (e) {
     logEvent(`BOT_WARN|poll.js|sweep-error|${e.message}`)
   }
-
-  pruneBusyHeld()
-  const { busy: mainBusy, degraded, lockTs } = checkMainBusy()
-  // 额度耗尽与主会话忙碌走同一条 hold 路径：不 emit、进 busy-held、恢复后补推
-  // hold 能力只有纯 polling 才有（下一 tick 能重 fetch）；push 模式推来的消息不 emit 即永久丢
-  const { hold: quotaHold } = await checkQuotaAndNotify({ holdCapable: IM_MODE === 'polling' })
-  const holdMsgs = mainBusy || quotaHold
-
-  const msgs = await pollMessages(holdMsgs ? HOLD_PAGE_SIZE : PAGE_SIZE)
-  if (msgs === null) {
-    if (consecutiveFailures >= FAIL_ALERT_THRESHOLD && !alertedOnce) {
-      console.log(`BOT_ERROR|poll.js|adapter 连续失败 ${consecutiveFailures} 次，可能认证过期或网络故障`)
-      alertedOnce = true
-    }
-    await runStallCheck({ mainBusy })  // 拉取失败不影响本地信号判定
-    return
-  }
-  if (msgs.length === 0) {
-    logDebug(`tick|lastTime=${state.last_processed_time}|msgs=0|busy=${mainBusy}|quotaHold=${quotaHold}|held=${busyHeld.size}`)
-    await runStallCheck({ mainBusy })
-    return
-  }
-
-  const lastTime = Number(state.last_processed_time || 0)
-  const emitted = readEmitted()
-  // adapter 返回降序，翻成升序处理
-  const asc = [...msgs].reverse()
-  const newlyEmitted = []
-  let busySeenNew = false
-  let busyHeldDirty = false
-  let botMsgMaxTime = 0  // 本 tick 看到的 bot 自己发言的最大 createTimeMs（假死告警的「已接手」信号之一）
-  // 过滤理由分布（debug 用）
-  const reasons = { id: 0, emitted: 0, bot: 0, type: 0, time: 0, atOthers: 0, held: 0, emitNow: 0, lateRelease: 0 }
-
-  for (const m of asc) {
-    if (!m.id) { reasons.id++; continue }
-    if (emitted.has(m.id)) {
-      reasons.emitted++
-      // 已被别的路径消费（push 先到 / permission-bridge 吃掉管理员回复）→ 不必再 hold
-      if (busyHeld.has(m.id)) { busyHeld.delete(m.id); busyHeldDirty = true }
-      continue
-    }
-    if (m.senderType === 'bot') {
-      reasons.bot++
-      if (m.createTimeMs > botMsgMaxTime) botMsgMaxTime = m.createTimeMs
-      continue
-    }
-    if (!VALID_TYPES.has(m.type)) { reasons.type++; continue }
-
-    // busy-held：在 hold 列表里的消息绕过 lastTime 过滤（issue #9）
-    const isHeld = busyHeld.has(m.id)
-    if (!isHeld && (!m.createTimeMs || m.createTimeMs <= lastTime)) { reasons.time++; continue }
-
-    // @他人过滤：视为已处理（append emitted），下次不再扫
-    if (isAtOthers(m.mentions)) {
-      reasons.atOthers++
-      newlyEmitted.push(m.id)
-      if (isHeld) { busyHeld.delete(m.id); busyHeldDirty = true }
-      continue
-    }
-
-    if (holdMsgs) {
-      // 主窗口忙 / 额度耗尽：不 emit、不记 emitted；记 busy-held（持久化，下次绕过 time 过滤直到 emit 成功）
-      busySeenNew = true
-      if (!isHeld) {
-        busyHeld.set(m.id, { ts: Date.now() })
-        busyHeldDirty = true
-        reasons.held++
-        // reaction ack — 装饰性，失败不影响 hold/emit 链路（issue #12）
-        await tryReactBusy(m)
-      }
-      continue
-    }
-
-    // busy 已退出 + 该消息曾被 held：emit 之；若 createTime < lastTime 说明 main 通过 fetch-before-reply 越过了 state，
-    // 重新 emit 可能导致主会话重复回复 — 写 BOT_WARN 让运维可见（main 端 SOP 应做 dedup，见 SKILL）
-    if (isHeld && m.createTimeMs <= lastTime) {
-      logEvent(`BOT_WARN|poll.js|busy-held-late-release|msg=${m.id}|ct=${m.createTimeMs}|lastTime=${lastTime}|main 可能已 fetch 处理过；重新 emit，需主会话端 dedup`)
-      reasons.lateRelease++
-    }
-
-    emitNewMsg(m)
-    newlyEmitted.push(m.id)
-    reasons.emitNow++
-    if (isHeld) { busyHeld.delete(m.id); busyHeldDirty = true }
-  }
-
-  if (busyHeldDirty) persistBusyHeld()
-  if (mainBusy && busySeenNew) await sendMainBusyPlaceholder({ degraded, lockTs })
-  if (newlyEmitted.length > 0) appendEmitted(newlyEmitted)
-  logDebug(`tick|lastTime=${lastTime}|msgs=${msgs.length}|busy=${mainBusy}|quotaHold=${quotaHold}|held=${busyHeld.size}|reasons=${JSON.stringify(reasons)}`)
-  await runStallCheck({ mainBusy, botMsgMaxTime })
 }
 
-// self-poll 单次模式：跑一次拉取，输出新消息到 stdout 后退出（由 /loop 每轮驱动，不依赖 Monitor）。
 // 复用 tick 的过滤/去重逻辑，但不做 mainBusy/EPIPE/lock/常驻（单次执行不需要）。
 async function pollOnce() {
   let state = readState()
   state = guardFutureTime(state)
   if (state.paused) return
-  const msgs = await pollMessages()
-  if (msgs === null) {
+  loadCursors()
+  const emitted = readEmitted()
+  const pendingPerm = readPermissionPending()
+  const newlyEmitted = []
+  let okChats = 0
+  for (const chatId of CHAT_IDS) {
+    const msgs = await pollChat(chatId, PAGE_SIZE)
+    if (msgs === null) continue
+    okChats++
+    const lastTime = cursorFor(chatId, state)
+    let maxDoneCt = 0
+    for (const m of [...msgs].reverse()) {
+      if (!m.id) continue
+      if (!m.chatId) m.chatId = chatId
+      if (emitted.has(m.id)) continue
+      if (m.senderType === 'bot') continue
+      if (!VALID_TYPES.has(m.type)) continue
+      if (!m.createTimeMs || m.createTimeMs <= lastTime) continue
+      if (isAtOthers(m.mentions) || isPermissionReply(m, pendingPerm)) {
+        newlyEmitted.push(m.id); if (m.createTimeMs > maxDoneCt) maxDoneCt = m.createTimeMs
+        continue
+      }
+      emitNewMsg(m)
+      newlyEmitted.push(m.id); if (m.createTimeMs > maxDoneCt) maxDoneCt = m.createTimeMs
+    }
+    advanceCursor(chatId, maxDoneCt)
+  }
+  if (okChats === 0) {
     console.log(`BOT_ERROR|poll.js|once|adapter 拉取失败（认证过期或网络故障）`)
     process.exitCode = 1
     return
   }
-  if (msgs.length === 0) return
-  const lastTime = Number(state.last_processed_time || 0)
-  const emitted = readEmitted()
-  const asc = [...msgs].reverse()
-  const newlyEmitted = []
-  for (const m of asc) {
-    if (!m.id) continue
-    if (emitted.has(m.id)) continue
-    if (m.senderType === 'bot') continue
-    if (!VALID_TYPES.has(m.type)) continue
-    if (!m.createTimeMs || m.createTimeMs <= lastTime) continue
-    if (isAtOthers(m.mentions)) { newlyEmitted.push(m.id); continue }
-    emitNewMsg(m)
-    newlyEmitted.push(m.id)
-  }
-  if (newlyEmitted.length > 0) appendEmitted(newlyEmitted)
+  if (newlyEmitted.length > 0) safeAppendEmitted(newlyEmitted)
 }
 
 // ========== 启动 ==========
@@ -830,7 +951,7 @@ function fallbackToPolling(reason) {
   tickTimer = setTimeout(scheduleTick, 1000)
 }
 
-// Push 模式（slack）：单条到达，复用 tick 内部的过滤/emit 逻辑
+// Push 模式（slack / lark push）：单条到达，复用 tick 内部的过滤/emit 逻辑
 async function handlePushMessage(m) {
   if (!checkStdoutTolerance()) return
   verifyLock()
@@ -839,18 +960,22 @@ async function handlePushMessage(m) {
   state = guardFutureTime(state)
   if (state.paused) return
 
+  if (!m || !m.id) return
+  if (!m.chatId) m.chatId = PRIMARY_CHAT_ID  // 老 adapter 不带 chat → 视为主群
+  if (MULTI_CHAT && !CHAT_IDS.includes(m.chatId)) return  // adapter 已按集合过滤，这里双保险
+
   const { busy: mainBusy, degraded, lockTs } = checkMainBusy()
-  const lastTime = Number(state.last_processed_time || 0)
+  const lastTime = cursorFor(m.chatId, state)
   const emitted = readEmitted()
 
-  if (!m || !m.id) return
   if (emitted.has(m.id)) return
   if (m.senderType === 'bot') return
   if (!VALID_TYPES.has(m.type)) return
   if (!m.createTimeMs || m.createTimeMs <= lastTime) return
 
-  if (isAtOthers(m.mentions)) {
-    appendEmitted([m.id])
+  if (isAtOthers(m.mentions) || isPermissionReply(m, readPermissionPending())) {
+    safeAppendEmitted([m.id])
+    advanceCursor(m.chatId, m.createTimeMs)
     return
   }
 
@@ -860,21 +985,30 @@ async function handlePushMessage(m) {
     // 主会话忙时 CC 会自动把 notification 排队，忙完按顺序处理 → 消息不丢 + 不打断主会话节奏。
     // busy 占位由 sendMainBusyPlaceholder 内部做 per-lock + 全局节流去重，不会刷屏。
     emitNewMsg(m)
-    appendEmitted([m.id])
+    safeAppendEmitted([m.id])
+    advanceCursor(m.chatId, m.createTimeMs)
     // reaction ack — 装饰性，与 emit/占位并列，失败不影响主链路（issue #12）
     await tryReactBusy(m)
-    await sendMainBusyPlaceholder({ degraded, lockTs })
+    await sendMainBusyPlaceholder({ degraded, lockTs, chatId: m.chatId })
     return
   }
 
   emitNewMsg(m)
-  appendEmitted([m.id])
+  safeAppendEmitted([m.id])
+  advanceCursor(m.chatId, m.createTimeMs)
 }
 
+// 首连也给重试预算：/cc-bot:start 时一次网络抖动（30s 内没 ready）不该让这一整个进程生命周期都失去免配额传输
+let pushStartAttempts = 0
+const PUSH_START_MAX_ATTEMPTS = 3
+const PUSH_START_RETRY_MS = 10 * 1000
+
 async function startPushMode() {
+  pushStartAttempts++
   try {
     await adapter.startListening({
-      chatId: CHAT_ID,
+      chatId: PRIMARY_CHAT_ID,
+      chatIds: CHAT_IDS,
       onMessage: (m) => {
         handlePushMessage(m).catch(err => {
           console.log(`BOT_ERROR|poll.js|push-handler|${err.message}`)
@@ -882,21 +1016,31 @@ async function startPushMode() {
       },
       onError: (err) => {
         const msg = (err && err.message) || String(err)
+        if (err && err.warn) { logEvent(`BOT_WARN|poll.js|push-event-dropped|${msg}`); return }
         // lark push：adapter 自己退避重连；fatal（环境不满足 / 重连耗尽）才回落 polling
         if (LARK_PUSH_OPTIN && err && err.fatal) { fallbackToPolling(msg); return }
         if (err && err.transient) { logEvent(`BOT_WARN|poll.js|push-stream-transient|${msg}`); return }
         console.log(`BOT_ERROR|poll.js|push-stream|${msg}`)
       },
     })
-    console.log(`BOT_INFO|poll.js|push-listening|${im.type}|${CHAT_ID}`)
+    console.log(`BOT_INFO|poll.js|push-listening|${im.type}|${CHAT_IDS.join(',')}`)
     if (LARK_PUSH_OPTIN) {
-      // 校对轮询：低频 tick 复用 polling 全套过滤 / 去重 / 额度检查，补事件流漏掉的消息
+      // 校对轮询：低频 tick 复用 polling 全套过滤 / 去重 / 额度检查，补事件流漏掉的消息。
+      // 第一次 5s 后就跑：把 bot 离线期间 / 连接建立前到达的消息尽快补出来，之后按 RECONCILE_INTERVAL_MS。
       tickIntervalMs = RECONCILE_INTERVAL_MS
-      if (!tickLoopStarted) { tickLoopStarted = true; tickTimer = setTimeout(scheduleTick, RECONCILE_INTERVAL_MS) }
+      if (!tickLoopStarted) { tickLoopStarted = true; tickTimer = setTimeout(scheduleTick, 5000) }
     }
   } catch (err) {
     const msg = (err && err.message) || String(err)
-    if (LARK_PUSH_OPTIN) { fallbackToPolling(msg); return }
+    if (LARK_PUSH_OPTIN) {
+      if (!(err && err.fatal) && pushStartAttempts < PUSH_START_MAX_ATTEMPTS) {
+        logEvent(`BOT_WARN|poll.js|push-start-retry|attempt=${pushStartAttempts}|${msg}`)
+        setTimeout(startPushMode, PUSH_START_RETRY_MS)
+        return
+      }
+      fallbackToPolling(msg)
+      return
+    }
     console.log(`BOT_ERROR|poll.js|push-start|${msg}`)
     process.exit(1)
   }
@@ -912,22 +1056,29 @@ if (ONCE_MODE) {
   acquireLock()
   loadBusyHeld()  // v0.1.20：恢复上次未 emit 的 held 消息（issue #9）
   loadReacted()   // v0.1.21：恢复上次已打 reaction 的 msg id 集合（issue #12，防重打）
+  loadCursors()   // v0.1.51：多群各自游标（单群 no-op）
   // 退出前顺手关事件长连接子进程（lark push）：关 stdin = lark-cli 的优雅退出信号，走退订不留孤儿
   const shutdownAdapter = () => { try { if (typeof adapter.stopListeningSync === 'function') adapter.stopListeningSync() } catch {} }
   process.on('exit', () => { shutdownAdapter(); releaseLock() })
   process.on('SIGINT', () => { shutdownAdapter(); releaseLock(); process.exit(0) })
   process.on('SIGTERM', () => { shutdownAdapter(); releaseLock(); process.exit(0) })
-  process.on('uncaughtException', () => {})
-  process.on('unhandledRejection', () => {})
+  // 不退出但要留痕：没有这两行 events.log 对任何 tick 内的异常都是一片空白
+  process.on('uncaughtException', (e) => { logEvent(`BOT_ERROR|poll.js|uncaught|${String((e && e.stack) || e).slice(0, 1200)}`) })
+  process.on('unhandledRejection', (e) => { logEvent(`BOT_ERROR|poll.js|unhandled-rejection|${String((e && e.stack) || e).slice(0, 1200)}`) })
+  if (MULTI_CHAT) {
+    console.log(`BOT_INFO|poll.js|multi-chat|监听 ${CHAT_IDS.length} 个群：${CHAT_IDS.join(', ')}（主群 ${PRIMARY_CHAT_ID}；各群独立游标 poll.cursors.json；NEW_MSG 末尾带 CHAT=<群>）`)
+  }
   // issue #23：启动打印配额成本预测，让 polling 的租户 API 消耗前置可见。
   // 飞书基础版租户级共享 1M 调用/月，polling 计费、事件订阅不计费。
-  // lark 空转经 epoch 记忆化后 ≈ 1 计费/tick；活跃 tick 遇新消息再 +1 raw 调用。
+  // lark 空转经 epoch 记忆化后 ≈ 1 计费/tick/群；活跃 tick 遇新消息再 +1 raw 调用。
+  const nChats = CHAT_IDS.length
+  const perChat = nChats > 1 ? ` × ${nChats} 群` : ''
   if (IM_MODE === 'polling') {
-    const ticksPerDay = Math.round((86400 * 1000) / CHECK_INTERVAL_MS)
-    console.log(`BOT_INFO|poll.js|quota-projection|${im.type} polling @ ${Math.round(CHECK_INTERVAL_MS / 1000)}s：空转≈${ticksPerDay} calls/day ≈${Math.round(ticksPerDay * 30 / 1000)}k/month（租户级共享配额；活跃遇新消息 tick +1）`)
+    const ticksPerDay = Math.round((86400 * 1000) / CHECK_INTERVAL_MS) * nChats
+    console.log(`BOT_INFO|poll.js|quota-projection|${im.type} polling @ ${Math.round(CHECK_INTERVAL_MS / 1000)}s${perChat}：空转≈${ticksPerDay} calls/day ≈${Math.round(ticksPerDay * 30 / 1000)}k/month（租户级共享配额；活跃遇新消息 tick +1）`)
   } else if (LARK_PUSH_OPTIN) {
-    const reconcilesPerDay = Math.round((86400 * 1000) / RECONCILE_INTERVAL_MS)
-    console.log(`BOT_INFO|poll.js|quota-projection|lark push（事件长连接，不计配额）+ 校对轮询 @ ${Math.round(RECONCILE_INTERVAL_MS / 1000)}s：空转≈${reconcilesPerDay} calls/day；长连接不可用自动回落 polling @ ${Math.round(CHECK_INTERVAL_MS / 1000)}s`)
+    const reconcilesPerDay = Math.round((86400 * 1000) / RECONCILE_INTERVAL_MS) * nChats
+    console.log(`BOT_INFO|poll.js|quota-projection|lark push（事件长连接，不计配额）+ 校对轮询 @ ${Math.round(RECONCILE_INTERVAL_MS / 1000)}s${perChat}：空转≈${reconcilesPerDay} calls/day；长连接不可用自动回落 polling @ ${Math.round(CHECK_INTERVAL_MS / 1000)}s`)
   }
   if (stall.enabled) {
     console.log(`BOT_INFO|poll.js|stall-alert|主会话假死告警已开：emit 后 ${Math.round(stall.cfg.stallMs / 6000) / 10}min 内 HUD 心跳 / agents.json / 群内 bot 发言都无动静 → 发群 + 终端 BOT_WARN；mainBusy 期间不判，同一次每 30min 最多再提醒一次`)
@@ -935,19 +1086,15 @@ if (ONCE_MODE) {
   if (IM_MODE === 'push') {
     setTimeout(startPushMode, 1000)
     if (!LARK_PUSH_OPTIN) {
-      // slack push 没有 tick 循环，额度检查单挂低频定时器（lark push 由校对 tick 顺带做）。
-      // holdCapable=false：Socket Mode 推来的消息不 emit 就永久丢，没有「下一 tick 重 fetch」兜底，
+      // slack push 没有 tick 循环：额度检查 / 超时 sweep / 假死判定 合挂一个 60s 维护定时器（lark push 由校对 tick 顺带做）。
+      // 额度 holdCapable=false：Socket Mode 推来的消息不 emit 就永久丢，没有「下一 tick 重 fetch」兜底，
       // 所以耗尽期仍照常 emit（CC 会把 notification 排队），只是话术改成「恢复后麻烦重发」。
       setInterval(() => {
+        if (readState().paused) return
         checkQuotaAndNotify({ holdCapable: false }).catch(() => {})
-      }, QUOTA_CHECK_INTERVAL_MS)
-      if (stall.enabled) {
-        // 假死告警同理单挂定时器；paused 时不打扰群里
-        setInterval(() => {
-          if (readState().paused) return
-          runStallCheck({ mainBusy: checkMainBusy().busy }).catch(() => {})
-        }, STALL_CHECK_INTERVAL_MS)
-      }
+        runSweep()
+        if (stall.enabled) runStallCheck({ mainBusy: checkMainBusy().busy }).catch(() => {})
+      }, MAINTENANCE_INTERVAL_MS)
     }
   } else {
     tickTimer = setTimeout(scheduleTick, 1000)

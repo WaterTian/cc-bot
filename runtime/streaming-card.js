@@ -187,7 +187,7 @@ function contentHash(s) {
 
 // === transports ===
 
-// 飞书 open_message_id 严格格式：`om_` 前缀 + ≥20 alphanumeric 字符（实测 om_x100b6dc37c2d88b8b30ece54f94cae8 这种 36 字符）。
+// 飞书 open_message_id 严格格式：`om_` 前缀 + ≥20 alphanumeric 字符（实测形如 om_ + 33 位字母数字，共 36 字符）。
 // 旧版只检前缀导致 fake id（如 om_e2e_test）被认作真 om_，触发 reply 路径报"must start with om_"——表面 prefix 对但 id 不存在。
 // 收紧后 fake id 走 chat-id 直发分支，测试场景顺畅。
 const OM_ID_PATTERN = /^om_[a-z0-9]{20,}$/i
@@ -370,7 +370,8 @@ function cmdReport({ project, msgId, content, append, isFinal, status, errorMsg 
   }
 
   // 中途 update — 先 hash dedup（同 content 重复 patch 浪费 CardKit quota + 客户端闪烁）
-  const rendered = prettifyContent(state.content) || '🧠 思考中...'
+  // 中途也要截断：累积正文超 MAX_CONTENT_CHARS 后每次 PUT 都会被飞书拒，直到 --final 才截 → 群里卡片长时间不更新
+  const rendered = truncate(prettifyContent(state.content) || '🧠 思考中...', MAX_CONTENT_CHARS)
   const h = contentHash(rendered)
   if (state.lastContentHash === h) {
     // 不写 state（state.content 可能因 append 变了但 rendered 同；下次差异化再写）

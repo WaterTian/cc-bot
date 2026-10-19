@@ -121,7 +121,7 @@ if (!progressLine) safeExit()
 
 // 异步 spawn streaming-card.js report — hook 立即返回，不阻塞主流程
 try {
-  const child = spawn('node', [
+  const child = spawn(process.execPath, [  // 不依赖 PATH 里有 node（GUI 启动的 CC 常没有）
     STREAMING_CARD_CLI,
     'report',
     '--project', cwd,

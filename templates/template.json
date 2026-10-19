@@ -6,7 +6,7 @@
   "description": "项目一句话描述（可选）",
 
   "im": {
-    "_comment": "type 决定用哪个 adapter：lark | slack。locale 影响 bot 系统级文案（上下线通知 / busy 占位）的语言，缺省按 type 走：lark=zh-CN / slack=en-US；LLM 跟用户对话的语言不受此影响（跟随用户消息）。\n\n— lark 字段：bot_app_id (cli_xxx) / bot_open_id (ou_xxx，选填，配了能精准识别 @bot；未配=任何 @ 一律不响应) / chat_id (oc_xxx)\n— slack 字段：bot_user_id (U0xxx) / chat_id (C0xxx) / extra.bot_token (xoxb-...) / extra.app_token (xapp-1-...，Socket Mode 必需 scope connections:write)\n— busy_placeholder (可选，缺省 true)：主会话忙碌时是否向群发占位消息。设 false 完全关闭（包括 AskUserQuestion 卡死场景的 5min 降级心跳）。觉得占位刷屏 → 设 false；想保留卡死告警 → 留 true（v0.1.19+ 已按 per-lock 去重，长任务最多 1 条）\n— busy_reaction (可选，v0.1.21+ issue #12)：主会话忙时对每条新消息打 emoji reaction 作为'看见了'信号。缺省按 IM 走（lark='WAVE' 👋 / slack='eyes' 👀），设 false 关闭；自定义传 emoji key（lark emoji_type 枚举如 'SMILE'/'OK'/'THUMBSUP'/'HEART'/'LAUGH'，全表见 https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message-reaction/emojis-introduce ；slack reaction name 如 'wave'/'+1'）。Slack 老装需在 App manifest 加 scope reactions:write 才生效，否则首次失败写 BOT_WARN 不影响主流程\n— debug (可选，缺省 false)：v0.1.20+ 诊断开关。设 true 时 poll.js 每 tick 写 BOT_DEBUG 行到 .cc-bot/runtime/events.log（lastTime / msgs 数量 / 各过滤理由计数 / busy-held 变化），帮排查 issue #9 类'消息为啥没 emit'问题。生产环境默认关",
+    "_comment": "type 决定用哪个 adapter：lark | slack。locale 影响 bot 系统级文案（上下线通知 / busy 占位）的语言，缺省按 type 走：lark=zh-CN / slack=en-US；LLM 跟用户对话的语言不受此影响（跟随用户消息）。\n\n— lark 字段：bot_app_id (cli_xxx) / bot_open_id (ou_xxx，选填，配了能精准识别 @bot；未配=任何 @ 一律不响应) / chat_id (oc_xxx)\n— chat_ids (可选，v0.1.51+ issue #24)：额外监听的群 id 数组，lark / slack 通用；chat_id 仍是主群（上下线通知 / 权限桥 / 兜底目标）。多群时 poll.js 逐群拉取、每群独立游标（.cc-bot/runtime/poll.cursors.json，不会因 A 群把全局游标推高而丢 B 群的早消息），NEW_MSG 末尾带 CHAT=<群 id> 主会话按它回群；busy 占位 / 假死告警发到触发消息所在群，额度预警广播全部群；上下线通知每群一条。每多一个群 polling 每 tick 多 1 计费调用\n— slack 字段：bot_user_id (U0xxx) / chat_id (C0xxx) / extra.bot_token (xoxb-...) / extra.app_token (xapp-1-...，Socket Mode 必需 scope connections:write)\n— busy_placeholder (可选，缺省 true)：主会话忙碌时是否向群发占位消息。设 false 完全关闭（包括 AskUserQuestion 卡死场景的 5min 降级心跳）。觉得占位刷屏 → 设 false；想保留卡死告警 → 留 true（v0.1.19+ 已按 per-lock 去重，长任务最多 1 条）\n— busy_reaction (可选，v0.1.21+ issue #12)：主会话忙时对每条新消息打 emoji reaction 作为'看见了'信号。缺省按 IM 走（lark='WAVE' 👋 / slack='eyes' 👀），设 false 关闭；自定义传 emoji key（lark emoji_type 枚举如 'SMILE'/'OK'/'THUMBSUP'/'HEART'/'LAUGH'，全表见 https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message-reaction/emojis-introduce ；slack reaction name 如 'wave'/'+1'）。Slack 老装需在 App manifest 加 scope reactions:write 才生效，否则首次失败写 BOT_WARN 不影响主流程\n— debug (可选，缺省 false)：v0.1.20+ 诊断开关。设 true 时 poll.js 每 tick 写 BOT_DEBUG 行到 .cc-bot/runtime/events.log（lastTime / msgs 数量 / 各过滤理由计数 / busy-held 变化），帮排查 issue #9 类'消息为啥没 emit'问题。生产环境默认关",
     "type": "lark",
     "locale": "",
     "busy_placeholder": true,
@@ -21,6 +21,7 @@
     "bot_app_id": "cli_xxxxxxxxxxxx",
     "bot_open_id": "",
     "chat_id": "oc_xxxxxxxxxxxx",
+    "chat_ids": [],
     "chat_name": "飞书群名称",
     "_slack_example": {
       "type": "slack",
@@ -30,6 +31,7 @@
       "debug": false,
       "bot_user_id": "U0XXXXXXXXX",
       "chat_id": "C0XXXXXXXXX",
+      "chat_ids": [],
       "chat_name": "channel-name",
       "extra": {
         "bot_token": "xoxb-...",
@@ -79,7 +81,7 @@
   },
 
   "quota_alert": {
-    "_comment": "v0.1.47+ Claude 额度预警（runtime/quota-alert.js）。poll.js 每 tick 读 hud-stdin.json 的 rate_limits.five_hour，跨阈值主动发群一条 —— 群成员看不到 CC 终端，额度耗尽时只体验到「bot 突然不说话」会误判成挂了。\n— enabled（缺省 true）：设 false 全关。每个 5h 窗口最多 2-3 条，与 im.busy_placeholder 同性质默认开\n— five_hour.warn_at / urgent_at（缺省 85 / 95）：两档预警线，达 100% 自动进「耗尽」档。每档每窗口一条，只升不降（0→97% 只发 urgent 不补 warn）\n— notify_recovered（缺省 true）：上窗口发过 urgent/耗尽时，新窗口发一条「● 额度已恢复」；只发过 warn 不发\n— hold_messages_when_exhausted（缺省 true）：耗尽期群消息不 emit、暂存 poll.busy-held，恢复后补推。不开则消息被 emit 但主会话无额度处理，poll.emitted 已记而 state 没推进 = 永久丢。⚠ 仅 lark 生效：slack 是 push，不 emit 等于永久丢，故照常 emit + 话术自动换成「恢复后麻烦重发」\n去重用 resets_at 当窗口键存 quota-notified.json，窗口一滚自动清零；HUD 超 15min 未更新或 resets_at 已过期则静默跳过，不误报。",
+    "_comment": "v0.1.47+ Claude 额度预警（runtime/quota-alert.js）。poll.js 每 tick 读 hud-stdin.json 的 rate_limits.five_hour，跨阈值主动发群一条 —— 群成员看不到 CC 终端，额度耗尽时只体验到「bot 突然不说话」会误判成挂了。\n— enabled（缺省 true）：设 false 全关。每个 5h 窗口最多 2-3 条，与 im.busy_placeholder 同性质默认开\n— five_hour.warn_at / urgent_at（缺省 85 / 95）：两档预警线，达 100% 自动进「耗尽」档。每档每窗口一条，只升不降（0→97% 只发 urgent 不补 warn）\n— notify_recovered（缺省 true）：上窗口发过 urgent/耗尽时，新窗口发一条「● 额度已恢复」；只发过 warn 不发\n— hold_messages_when_exhausted（缺省 true）：耗尽期群消息不 emit、暂存 poll.busy-held，恢复后补推。不开则消息被 emit 但主会话无额度处理，poll.emitted 已记而 state 没推进 = 永久丢。⚠ 仅 lark polling 生效：slack 和 lark push 都是推送，不 emit 等于永久丢，故照常 emit + 话术自动换成「恢复后麻烦重发」\n去重用 resets_at 当窗口键存 quota-notified.json，窗口一滚自动清零；HUD 超 15min 未更新或 resets_at 已过期则静默跳过，不误报。",
     "enabled": true,
     "five_hour": {
       "warn_at": 85,
@@ -90,18 +92,20 @@
   },
 
   "heartbeat": {
-    "_comment": "v0.1.50+ 主会话假死告警（runtime/stall-alert.js，issue #4）。poll.js 把一条群消息 emit 给主会话后，若 stall_mins 内主会话毫无动静（statusline 心跳 hud-stdin.json 不更新 / 没派单 agents.json 不变 / 群里没有 bot 发言），主动往群里发一条「⚠️ 主会话似乎卡住了」+ 终端 BOT_WARN + events.log —— 否则假死时群里和终端都是一片静默，没人会想起来跑 doctor。\n— stall_mins（缺省 0 = 关闭，与 dispatch.max_turn_time_mins 同约定）：等待分钟数，建议 10~15。太小会把「主会话正在为上一条消息跑长任务」误报成卡住（文案留了余地：似乎卡住了）；同一次卡住每 30min 最多再提醒一次\n— notify_recovered（缺省 true）：报过卡住后主会话一有动静，补一条「✅ 已恢复响应」\n零额外 API 调用只看本地文件；终端用户占着主会话（main-busy 锁）期间不判，占位文案已说明情况；未装 statusline shim（无 hud-stdin.json）时不判并在 events.log 提示一次。",
+    "_comment": "v0.1.50+ 主会话假死告警（runtime/stall-alert.js，issue #4）。poll.js 把一条群消息 emit 给主会话后，若 stall_mins 内主会话毫无动静（statusline 心跳 hud-stdin.json 不更新 / 没派单 agents.json 不变 / 群里没有 bot 发言），主动往群里发一条「⚠️ 主会话似乎卡住了」+ 终端 BOT_WARN + events.log —— 否则假死时群里和终端都是一片静默，没人会想起来跑 doctor。\n— stall_mins（缺省 0 = 关闭，与 dispatch.max_turn_time_mins 同约定）：等待分钟数，建议 10~15。太小会把「主会话正在为上一条消息跑长任务」误报成卡住（文案留了余地：似乎卡住了）；同一次卡住每 30min 最多再提醒一次\n— notify_recovered（缺省 true）：报过卡住后主会话一有动静，补一条「✅ 已恢复响应」\n零额外 API 调用只看本地文件；终端用户占着主会话（main-busy 锁）期间不判，占位文案已说明情况；未装 statusline shim（无 hud-stdin.json）时不判并在 events.log 提示一次。HUD 心跳在主会话任何一次输出后都会刷新（包括终端用户随手说一句），所以「已接手」判得偏宽 —— 宁可漏报不误报。",
     "stall_mins": 0,
     "notify_recovered": true
   },
 
   "permission_bridge": {
-    "_comment": "v0.1.49+ 权限桥（runtime/permission-bridge.js，CC PermissionRequest hook）。主会话弹「允许 / 拒绝」权限框时转发到群，解决人不在终端边 bot 卡在弹窗上的问题。\n— enabled（缺省 false）：总开关。setup 已把 hook 注册到 ~/.claude/settings.json，但不开此项 hook 立即静默退出，零影响\n— mode：'notify'（缺省，单向：群里发一条「🔐 需要授权」提示，终端照常等人）| 'approve'（双向：members.admin_open_ids 里的人回「允许 <id>」/「拒绝 <id>」即代答 CC；wait_secs 内无人回应交回终端 = fail-closed）\n— wait_secs（缺省 90，范围 10~540）：approve 模式等待时长\n安全：只认管理员；远端只能本次允许、绝不写 always-allow 规则；每次决策写 events.log 审计；发群前自动脱敏。bot paused 时不转发。",
+    "_comment": "v0.1.49+ 权限桥（runtime/permission-bridge.js，CC PermissionRequest hook）。主会话弹「允许 / 拒绝」权限框时转发到群，解决人不在终端边 bot 卡在弹窗上的问题。\n— enabled（缺省 false）：总开关。setup 已把 hook 注册到 ~/.claude/settings.json，但不开此项 hook 立即静默退出，零影响\n— mode：'notify'（缺省，单向：群里发一条「🔐 需要授权」提示，终端照常等人）| 'approve'（双向：members.admin_open_ids 里的人回「允许 <id>」/「拒绝 <id>」即代答 CC；wait_secs 内无人回应交回终端 = fail-closed）\n— wait_secs（缺省 90，范围 10~540）：approve 模式等待时长\n安全：只认管理员；远端只能本次允许、绝不写 always-allow 规则；每次决策写 events.log 审计；发群前自动脱敏。bot paused 时不转发。泛用应答词（ok / yes / 1 / 好 / no / 2）必须带 #id 才算数，防群里随口应答误放行；明确词（允许 / 拒绝 / allow / deny）只有一个待决时可省 id。多群时只走主群 im.chat_id。",
     "enabled": false,
     "mode": "notify",
     "wait_secs": 90
   },
 
+  "polling_mode": "monitor",
+  "_polling_mode_comment": "消息回路驱动方式：'monitor'（缺省，官方 Claude：Monitor 工具托管常驻 poll.js）| 'self-poll'（弱 agentic 端点如 DeepSeek 调不动 Monitor：主会话用 /loop 每 self_poll_interval 跑一次 poll.js --once）。setup Stage E 按 ANTHROPIC_BASE_URL 自动判；start 时若与环境不符只警告不改。",
   "self_poll_interval": "3m",
   "polling_interval_ms": 60000,
   "push_reconcile_interval_ms": 300000,

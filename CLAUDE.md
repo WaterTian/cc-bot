@@ -16,7 +16,7 @@ cc-bot/
 │   ├── lark.js                  # 飞书实现（包 lark-cli；默认 polling，v0.1.49+ im.transport='push' 走 `lark-cli event consume` 事件长连接 + 自动重连，不可恢复抛 fatal 让 poll.js 回落）
 │   └── slack.js                 # Slack 实现（@slack/socket-mode + @slack/web-api，push 模式 v0.1.12+）
 ├── runtime/                    # 所有"决策 / 转换 / 状态管理"代码化的 CLI 工具（SKILL.md 调它们看返回 → 不再 prose 推理）
-│   ├── poll.js                  # 消息主进程（Monitor 托管）— 必须接 --project <abs>；IM_MODE='polling'(lark) / 'push'(slack)
+│   ├── poll.js                  # 消息主进程（Monitor 托管）— 必须接 --project <abs>；IM_MODE='polling'(lark) / 'push'(slack)；v0.1.51+ 多群 im.chat_ids（逐群拉取 + poll.cursors.json 每群游标 + NEW_MSG CHAT 标签）
 │   ├── slack-send.js            # 跨平台 Slack Web API helper（v0.1.12+ 规避 Win curl GBK 乱码 + token 暴露；v0.1.30+ 自动 redact）
 │   ├── atomic-write.js          # v0.1.36+ 原子写 helper — `.tmp-uuid + fsync + rename + cleanup`；runtime/ 全部 JSON 写点（agents.json / state.json / busy-held / profile / 等 8 处）统一走，防 crash/断电留半截
 │   ├── streaming-card.js        # v0.1.22+ Feishu CardKit v2 流式卡片 driver — worker 调 `report` 统一入口，CLI 内部按 profile + 内容长度自动选 卡片 / 文本 / 降级，自动 redact 自动脱敏；v0.1.36+ state.lastContentHash sha1 dedup 跳过同 content 重复 PUT（todo-bridge 高频同 diff 不再刷屏 + 省 CardKit quota）
@@ -59,11 +59,11 @@ cc-bot/
 
 ## 架构要点
 
-- **IMAdapter 抽象**：`adapters/base.js` 定义接口（`listRecentMessages` / `sendText` / `sendImage` / `downloadResource` / `getUser`，以及 push 模式扩展的 `startListening` / `stopListening`）。已有实现：`adapters/lark.js`（polling）+ `adapters/slack.js`（push，v0.1.12+）。扩展新 IM 时新增 adapter 文件 + `runtime/poll.js` 的 factory 分支 + profile `im.type` 即可。
+- **IMAdapter 抽象**：`adapters/base.js` 定义接口（`listRecentMessages` / `sendText` / `sendImage` / `downloadResource` / `getUser`，以及 push 模式扩展的 `startListening` / `stopListening`）。已有实现：`adapters/lark.js`（polling）+ `adapters/slack.js`（push，v0.1.12+）。扩展新 IM 时新增 adapter 文件 + `adapters/factory.js` 的分支 + profile `im.type` 即可（poll.js 与 permission-bridge 都经 factory 实例化）。
 - **两种工作模式**：`IM_MODE = 'polling'`（lark 默认：HTTP 60s tick 拉 `listRecentMessages`，mainBusy 时不 emit 等下 tick 重 fetch）/ `'push'`（slack：Socket Mode WebSocket 推送；lark v0.1.49+ `im.transport='push'` opt-in：`lark-cli event consume` 事件长连接，不计飞书配额，外加 `push_reconcile_interval_ms` 5min 校对轮询兜底静默断流，长连接不可用自动回落 polling）。push 模式 mainBusy 时**仍必须 emit**，错过永久丢失，与 polling 是根本不同原则。详见 memory `feedback_push_mode_mainbusy`。⚠ 一个 bot app 全局只能一条事件总线，多机共用同一 app 时只能一台开 push。
 - **IM 无关定位**：cc-bot 是 IM 无关的 Claude Code 群 bot 插件，目前已实现 lark + slack；见 memory `feedback_im_agnostic_design`。
 - **i18n**：`profile.im.locale` 缺省按 IM 类型决（lark=zh-CN / slack=en-US），覆盖 BUSY 占位 / 上下线通知 / HUD 行；详见 memory `feedback_im_i18n_default`。
-- **每项目独立 `.cc-bot/`**：使用 cc-bot 的项目在自己根目录下建 `.cc-bot/profiles/` + `.cc-bot/runtime/`，profile 和运行时状态都跟项目走，多项目互不污染。一项目一 IM。
+- **每项目独立 `.cc-bot/`**：使用 cc-bot 的项目在自己根目录下建 `.cc-bot/profiles/` + `.cc-bot/runtime/`，profile 和运行时状态都跟项目走，多项目互不污染。一项目一 IM；一项目可多群（v0.1.51+ `im.chat_ids`，issue #24）：poll.js 逐群拉取、每群独立游标 `poll.cursors.json`（全局游标跨群会丢交叉到达的早消息）、NEW_MSG 末尾带 `CHAT=<群>` 主会话按它回群与 fetch，占位 / 假死告警发触发群、额度预警广播、上下线通知逐群；权限桥只走主群 `im.chat_id`。
 - **poll.js 无项目假设**：启动参数 `--project <abs-path>`，所有路径基于此。`${CLAUDE_PLUGIN_ROOT}` 由 Claude Code 在插件安装后注入。
 - **三层防御**（详见 SKILL §poll.js 三层防御）：PID lockfile / stdout EPIPE / state 未来值自愈。2026-04-20 polling 架构三坑对策，不可删。v0.1.11 试过补第四层（父进程死亡自杀 ppid 重读），cc-bot-test Win 实测发现 bash 中间层导致检测失效已撤回，跨平台反向追溯 CC PID 方案移 v0.1.13+ 候选。
 

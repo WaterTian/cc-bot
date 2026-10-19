@@ -88,7 +88,7 @@ async function main() {
   const projectRoot = path.resolve(args.project || process.env.CC_BOT_PROJECT || '.')
   const profile = loadProfile(projectRoot)
   const adapter = loadAdapter(profile)
-  const chatId = profile.im.chat_id
+  const chatId = (args.channel && String(args.channel)) || profile.im.chat_id  // --channel 覆盖：多群上下线通知逐群发（v0.1.51+）
 
   try {
     switch (cmd) {

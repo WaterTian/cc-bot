@@ -3,7 +3,7 @@
 // 依赖：@slack/web-api + @slack/socket-mode（用户安装 plugin 后由 setup 引导 npm install）。
 //
 // 与 lark adapter 的关键差异：
-//   - lark 走 polling（poll.js 10s tick 调 listRecentMessages，v0.1.39+ 从 30s 提速到 10s）
+//   - lark 默认走 polling（poll.js 60s tick 调 listRecentMessages，v0.1.46+；v0.1.49+ 可 opt-in 事件长连接）
 //   - slack 走 Socket Mode push（startListening 建 WS 长连接，消息推到回调）
 //
 // 选择 Socket Mode 而非 polling 的原因（2026-05 调研）：
@@ -80,6 +80,7 @@ function normalizeMessage(event, botUserId) {
   const text = (event.text || '') + extra
   return {
     id: event.ts,
+    chatId: String(event.channel || ''),
     senderId,
     senderType,
     type,
@@ -131,7 +132,8 @@ class SlackAdapter extends IMAdapter {
     if (!res.ok) throw new Error(`conversations.history failed: ${res.error}`)
     const raw = Array.isArray(res.messages) ? res.messages : []
     // Slack 默认降序（最新在前），与 lark 一致
-    return raw.map(m => normalizeMessage(m, this._botUserId)).filter(Boolean)
+    // conversations.history 的消息体不带 channel，补上所查的 channel（多群 chatId 路由用）
+    return raw.map(m => normalizeMessage({ ...m, channel: m.channel || chatId }, this._botUserId)).filter(Boolean)
   }
 
   /**
@@ -180,7 +182,7 @@ class SlackAdapter extends IMAdapter {
     return { path: path.resolve(output) }
   }
 
-  _httpsDownload(url, output) {
+  _httpsDownload(url, output, { withAuth = true } = {}) {
     return new Promise((resolve, reject) => {
       const u = new URL(url)
       const req = https.get({
@@ -188,10 +190,14 @@ class SlackAdapter extends IMAdapter {
         hostname: u.hostname,
         port: u.port || 443,
         path: u.pathname + u.search,
-        headers: { Authorization: `Bearer ${this._botToken}` },
+        headers: withAuth ? { Authorization: `Bearer ${this._botToken}` } : {},
       }, (res) => {
         if (res.statusCode === 302 || res.statusCode === 301) {
-          this._httpsDownload(res.headers.location, output).then(resolve, reject)
+          // 跨域跳转不再带 bot token（跳去 CDN / 第三方时不能把 xoxb 交出去）
+          let sameHost = false
+          try { sameHost = new URL(res.headers.location, url).hostname === u.hostname } catch {}
+          res.resume()
+          this._httpsDownload(new URL(res.headers.location, url).toString(), output, { withAuth: withAuth && sameHost }).then(resolve, reject)
           return
         }
         if (res.statusCode !== 200) {
@@ -201,14 +207,16 @@ class SlackAdapter extends IMAdapter {
         }
         const tmp = output + '.part'
         const ws = fs.createWriteStream(tmp)
+        const cleanup = (e) => { try { fs.unlinkSync(tmp) } catch {} ; reject(e) }
         res.pipe(ws)
         ws.on('finish', () => {
           ws.close(() => {
-            try { fs.renameSync(tmp, output) } catch (e) { reject(e); return }
+            try { fs.renameSync(tmp, output) } catch (e) { cleanup(e); return }
             resolve()
           })
         })
-        ws.on('error', reject)
+        ws.on('error', cleanup)
+        res.on('error', cleanup)
       })
       req.on('error', reject)
       req.setTimeout(60000, () => { req.destroy(new Error('download timeout')) })
@@ -249,9 +257,10 @@ class SlackAdapter extends IMAdapter {
 
   // Push 模式核心 — Socket Mode 接事件，归一化后调 onMessage。
   // SDK 内部处理 disconnect/refresh_requested + 自动重连，断流彻底无法自愈才走 onError。
-  async startListening({ chatId, onMessage, onError } = {}) {
+  async startListening({ chatId, chatIds, onMessage, onError } = {}) {
     if (!onMessage) throw new Error('startListening: onMessage required')
     if (this._sm) throw new Error('startListening: already listening')
+    const chatSet = new Set([chatId, ...(Array.isArray(chatIds) ? chatIds : [])].filter(Boolean))  // v0.1.51+ 多群
 
     const sm = new this._SocketModeClient({ appToken: this._appToken })
     this._sm = sm
@@ -261,7 +270,7 @@ class SlackAdapter extends IMAdapter {
       try { await ack() } catch {}
       try {
         // chatId 守卫：只 emit 配置 channel 的消息（避免 bot 加多个群时跨群污染）
-        if (chatId && event && event.channel && event.channel !== chatId) return
+        if (chatSet.size > 0 && event && event.channel && !chatSet.has(event.channel)) return
         // 子类型守卫：忽略 channel_join / message_changed / message_deleted 等
         if (event && event.subtype && event.subtype !== 'file_share') return
         const m = normalizeMessage(event, this._botUserId)

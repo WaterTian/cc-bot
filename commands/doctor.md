@@ -32,9 +32,10 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 
 - File exists? ✗ if missing → suggest `/cc-bot:setup`
 - Field validity (for lark profiles):
-  - `im.type` in `['lark']` — 其他值 → ✗ unsupported adapter
+  - `im.type` in `['lark', 'slack']` — 其他值 → ✗ unsupported adapter
   - `im.bot_app_id` matches `^cli_[a-z0-9]+$` and **not** `cli_xxxxxxxxxxxx` — ✗ if still placeholder
   - `im.chat_id` starts with `oc_` and length > 20 — ✗ if placeholder
+  - `im.chat_ids`（v0.1.51+，可选，多群）：若存在须是数组、每项非空字符串且格式同 `im.chat_id`（lark `oc_` / slack `C`）；类型不对 → ✗；含重复 / 含 `im.chat_id` 本身 → ℹ 运行时已自动去重；非空时报 ℹ「监听 N 个群（主群 `<chat_id>`），polling 每 tick N 次计费调用，NEW_MSG 带 CHAT 标签」。⚠ 若 profile 顶级或 `im` 块里出现 `chat_ids` 以外的多群写法（如 `chat_id` 是数组）→ ✗「多群请用 `im.chat_ids`，`im.chat_id` 必须是单个主群」
   - `project.root` is an existing directory — ✗ if path 不存在 / 仍是 `D:/Path/To/Project`
   - `paths.bot_temp_abs` / `bot_temp_rel` both present — ⚠ if missing
   - `members.admin_open_ids` non-empty array — ⚠ if `[]`（ admin 权限矩阵将全部回退到 member）
@@ -42,7 +43,7 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 - **`privacy.blocklist`（v0.1.24+，可选）**：若 `profile.privacy.blocklist` 存在，校验是数组且每项是非空 string —— ✗ 命中非法值。校验长度 ≥ 2（短真名易误吃），< 2 报 ⚠"<name>" 太短可能误吃常用词。
 - **`dispatch.max_turn_time_mins`（v0.1.37+，可选）**：若存在，校验是非负数（默认 `0`=不启用）。`> 0` 且 `< 5` 时报 ⚠「<N> min 偏激进，首次 pnpm i / 大仓 build 可能撞墙；建议 30+」；类型非数字 / 负值 → ✗。
 - **Profile 字段 migration（v0.1.28+）**：跑 `node ${CLAUDE_PLUGIN_ROOT}/runtime/profile-migrate.js check --project <root>`，若返回 `count > 0` → ⚠ 报「profile 缺 N 个新版字段：[paths...]，建议 /cc-bot:setup 自动 backfill」。本工具不修，doctor 是只读诊断；修法由 setup 跑 apply。
-- **Schema drift（v0.1.21+，issue #11）**：扫 profile **顶级**键，对每个属于 IM 域且应在 `im.*` 下的已知字段名报 ⚠。已知名单：`busy_placeholder` / `busy_reaction` / `debug` / `locale` / `type` / `bot_app_id` / `bot_open_id` / `chat_id` / `chat_name` / `bot_user_id` / `extra` / `streaming_card`。命中即报：
+- **Schema drift（v0.1.21+，issue #11）**：扫 profile **顶级**键，对每个属于 IM 域且应在 `im.*` 下的已知字段名报 ⚠。已知名单：`busy_placeholder` / `busy_reaction` / `debug` / `locale` / `type` / `bot_app_id` / `bot_open_id` / `chat_id` / `chat_ids` / `chat_name` / `bot_user_id` / `extra` / `streaming_card` / `transport`。命中即报：
   - ⚠ 「字段 `<name>` 写在 profile 顶级 — poll.js 只读 `im.<name>`，当前值不会生效。请把它搬到 `im` 块内」
   - 背景：v0.1.19 引入 `im.busy_placeholder` opt-out 时已纳 `im` 块，若用户曾按非官方示例写在顶级，开关将静默失效
 
@@ -93,8 +94,8 @@ Execute checks in parallel where possible. Collect results, then print one unifi
 飞书基础版配额是**租户级共享 1M 调用/月**，跨所有自建应用。polling 计费、事件订阅不计费；孤儿 poll.js（项目结束后忘了 stop）会 24h 不停烧配额，且撞满后**整租户所有 app** 都返 `99991403` / 429。本检查把「全机在跑的 poll.js」摊开可见（PID 单例锁只防同项目重复，跨项目孤儿它管不到）。
 
 - **枚举全机 poll.js**：
-  - **macOS / Linux**：`pgrep -fl 'runtime/poll\.js .*--project'`
-  - **Windows**（Git Bash）：`wmic process where "name='node.exe'" get processid,commandline 2>/dev/null | grep -i 'runtime[/\\]poll.js'`
+  - **macOS / Linux**：`ps -axo pid,command | grep -E 'runtime/poll\.js .*--project' | grep -v grep`（不用 `pgrep -fl`：Linux procps 只打进程名，取不到 `--project`）
+  - **Windows**（Git Bash）：`powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"name='node.exe'\" | Select-Object ProcessId,CommandLine" | grep -i 'runtime[/\\]poll.js'`（`wmic` 在 Win11 24H2+ 已移除）
 - 对每条提取 `--project <path>`：
   - path === 当前项目 → ✓ 本项目实例（正常）
   - path !== 当前项目 → ℹ 「另一项目 `<path>` 的 poll.js 在跑（pid <N>）」+ 进一步判该 path 是否仍存在：目录已删 / profile 缺失 → ⚠ 「疑似**孤儿**：项目 `<path>` 已不存在但 poll.js 仍在烧配额，建议 `kill <pid>` + 清其 `poll.pid`」
@@ -102,7 +103,7 @@ Execute checks in parallel where possible. Collect results, then print one unifi
   - `push` → ℹ 「lark push：事件长连接（不计配额）+ 校对轮询 @ `<push_reconcile_interval_ms/1000>`s ≈ `<86400000/interval>` calls/day」；再跑 `LARK_CLI_NO_PROXY=1 lark-cli event status --json` 看本机事件总线：`running=true` → ✓ 事件流在线；`not_running` 且本项目 poll.js 在跑 → ⚠ 「事件流未建立，poll.js 可能已回落 polling —— 看 `events.log` 最近的 `push-fallback-polling` 行取原因（常见：另一台机器占着该 app 的事件总线 / lark-cli 缺 scope）」
   - 其它值 → 走下面配额成本行（polling）
 - **配额成本行（本项目，仅 lark polling）**：读 `profile.polling_interval_ms`（缺省 60000，v0.1.46+）+ `im.type`，算空转投影：
-  - `ticksPerDay = round(86400000 / interval_ms)`；`calls/day ≈ ticksPerDay`（记忆化后空转 1 计费/tick）；`calls/month ≈ ticksPerDay × 30`
+  - `ticksPerDay = round(86400000 / interval_ms) × 群数`（`im.chat_ids` 多群时每群 1 次；记忆化后空转 1 计费/tick/群）；`calls/day ≈ ticksPerDay`；`calls/month ≈ ticksPerDay × 30`
   - ℹ 「本项目 lark polling @ `<interval_s>`s：空转≈`<calls/day>`/day ≈`<k/month>`k/month（活跃遇新消息 tick +1 raw 调用）」
   - 若 `interval_ms < 30000` → ⚠ 「间隔 `<X>`s 偏高频（默认 60s），配额成本按比例上升；多 bot / 多 app 共租户时务必调大 `polling_interval_ms`」
   - slack（push）→ ℹ 「push 模式事件驱动，空闲零轮询调用」
@@ -166,10 +167,10 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/quota-alert.js status --project <项目根>
 - Read `~/.claude/settings.json`。不存在 → ⚠ 未注册
 - `statusLine.command` 含 `cc-bot` 且含 `statusline.js` → 进一步查路径（`${CLAUDE_PLUGIN_ROOT}` 展开后的绝对路径）：
   - 路径含 `/plugins/cache/cc-bot/cc-bot/<ver>/` 且 `<ver>` = 本地缓存当前版本 → ✓
-  - 路径含 cache 但 `<ver>` 过期（不等于当前本地缓存版本）→ ⚠ 路径指向旧缓存版本，升级后未同步；建议重跑 `/cc-bot:setup`（step 8 会覆盖为当前路径）
+  - 路径含 cache 但 `<ver>` 过期（不等于当前本地缓存版本）→ ⚠ 路径指向旧缓存版本，升级后未同步；建议重跑 `/cc-bot:setup`（Stage E step 7 会覆盖为当前路径）
   - 路径不在 cache 下（指向 `D:/Projects/cc-bot` 等本地开发仓）→ ⚠ 路径非 cache，若该仓被移动或删除会失效；建议在正式（非 `--plugin-dir`）CC 会话里重跑 `/cc-bot:setup`
 - 含 `cc-hud` 不含 cc-bot → ⚠ shim 未经 cc-bot 包装，`hud-stdin.json` 不会落盘
-- 其他值 / 缺失 → ⚠ 建议重跑 `/cc-bot:setup`（step 8 会幂等注册）
+- 其他值 / 缺失 → ⚠ 建议重跑 `/cc-bot:setup`（Stage E step 7 会幂等注册）
 - ✓ 时进一步查 `.cc-bot/runtime/hud-stdin.json` 是否存在：
   - 不存在 → ⚠ statusline tick 尚未触发过，随便跑一次 tool 后再查
   - 存在但 JSON 解析失败 → ⚠ 文件损坏
@@ -179,9 +180,9 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/quota-alert.js status --project <项目根>
 同一份 `~/.claude/settings.json`，查 `hooks.UserPromptSubmit` / `hooks.Stop` 两个事件：
 - 任一事件下 `.hooks[].command` 含 `main-busy.js lock`（UserPromptSubmit）或 `main-busy.js unlock`（Stop） → 进一步查路径（规则同 §5）：
   - cache 路径且版本号 = 本地缓存当前版本 → ✓
-  - cache 路径但版本号过期 → ⚠ 建议重跑 `/cc-bot:setup`（step 9 会覆盖为当前路径）
+  - cache 路径但版本号过期 → ⚠ 建议重跑 `/cc-bot:setup`（Stage E step 8 会覆盖为当前路径）
   - 非 cache（指向本地开发仓）→ ⚠ 建议在正式（非 `--plugin-dir`）CC 会话里重跑 `/cc-bot:setup`
-- 两个事件都缺 → ⚠ 未注册（主窗口对话期间群消息不会让路）→ 建议重跑 `/cc-bot:setup`（step 9 会幂等注册）
+- 两个事件都缺 → ⚠ 未注册（主窗口对话期间群消息不会让路）→ 建议重跑 `/cc-bot:setup`（Stage E step 8 会幂等注册）
 - 只有一个 → ⚠ 半注册，另一侧缺失会导致锁永不解或永不上
 - 额外查 `.cc-bot/runtime/main-busy.lock` 存活状态：
   - 不存在 → ℹ 主窗口空闲

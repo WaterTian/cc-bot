@@ -99,7 +99,7 @@ class LarkAdapter extends IMAdapter {
     // epoch 记忆化缓存（issue #23）：message_id → 飞书原始 create_time(ms)。
     // epoch 不可变，一旦拉到即可跨 tick 复用；仅当 shortcut 出现缓存未覆盖的新 id 时才补拉，
     // 空转（窗口内 id 集不变）永不重复打 raw 调用 → listRecentMessages 从 2 次计费降到 1 次。
-    this._epochCache = new Map()
+    this._epochCaches = new Map()  // chatId -> Map(message_id -> epochMs)；按群独立，多群互不清对方缓存（issue #24）
     // push transport 状态（startListening 时初始化）
     this._listen = null
   }
@@ -172,8 +172,15 @@ class LarkAdapter extends IMAdapter {
     return map
   }
 
+  _epochCacheFor(chatId) {
+    let c = this._epochCaches.get(chatId)
+    if (!c) { c = new Map(); this._epochCaches.set(chatId, c) }
+    return c
+  }
+
   async listRecentMessages({ chatId, pageSize = 10 }) {
     if (!chatId) throw new Error('listRecentMessages: chatId required')
+    const epochCache = this._epochCacheFor(chatId)
     const out = this._run([
       'im', '+chat-messages-list',
       '--as', 'bot',
@@ -191,13 +198,13 @@ class LarkAdapter extends IMAdapter {
     // 仅当 shortcut 返回缓存未覆盖的新 message_id 时才补拉 —— 新消息（含同分钟兄弟）一次 raw
     // 拉回全窗口精确 epoch，精度不降；空转命中缓存 → 省掉整个第二次调用（2→1 计费/ tick）。
     // raw 失败静默返空 → 新 id 不入缓存 → 下 tick 自动重试，其间回落 parseCreateTimeMs（同旧行为）。
-    if (ids.some(id => !this._epochCache.has(id))) {
+    if (ids.some(id => !epochCache.has(id))) {
       const fresh = this._fetchCreateTimeEpochs({ chatId, pageSize })
-      for (const [id, ms] of fresh) this._epochCache.set(id, ms)
+      for (const [id, ms] of fresh) epochCache.set(id, ms)
       // prune 到当前窗口，界定缓存大小（epoch 不可变，丢弃出窗 id 无副作用）
-      if (this._epochCache.size > ids.length) {
+      if (epochCache.size > ids.length) {
         const keep = new Set(ids)
-        for (const id of this._epochCache.keys()) if (!keep.has(id)) this._epochCache.delete(id)
+        for (const id of epochCache.keys()) if (!keep.has(id)) epochCache.delete(id)
       }
     }
     return raw
@@ -206,11 +213,12 @@ class LarkAdapter extends IMAdapter {
         const senderId = (m.sender && m.sender.id) || ''
         return {
           id: m.message_id,
+          chatId,
           senderId,
           senderType: senderId === this._botAppId ? 'bot' : 'user',
           type: m.msg_type,
           content: sanitize(m.content),
-          createTimeMs: this._epochCache.get(m.message_id) || parseCreateTimeMs(m.create_time),
+          createTimeMs: epochCache.get(m.message_id) || parseCreateTimeMs(m.create_time),
           mentions: normalizeMentions(m.mentions),
           raw: m,
         }
@@ -306,10 +314,11 @@ class LarkAdapter extends IMAdapter {
     const content = sanitize(ev.content)
     return {
       id,
+      chatId: String(ev.chat_id || ''),
       senderId,
       // 事件不会推 bot 自己发的消息；其它 bot 的消息 sender 是 app id（cli_ 前缀）
       senderType: (senderId === this._botAppId || /^cli_/.test(senderId)) ? 'bot' : 'user',
-      type: ev.message_type,
+      type: ev.message_type || ev.msg_type,  // 扁平事件字段名 vs OAPI 原始字段名，两个都认
       content,
       createTimeMs: Number(ev.create_time) || Number(ev.timestamp) || Date.now(),
       mentions: content.includes('@') ? this._fetchMentions(id) : [],
@@ -323,11 +332,13 @@ class LarkAdapter extends IMAdapter {
    * ready 之后的断流由本 adapter 自己按退避重连；连续 RECONNECT_MAX_ATTEMPTS 次失败或遇 fatal
    * envelope → onError(err) 且 err.fatal=true，之后不再重连。
    */
-  async startListening({ chatId, onMessage, onError } = {}) {
+  async startListening({ chatId, chatIds, onMessage, onError } = {}) {
     if (!onMessage) throw new Error('startListening: onMessage required')
     if (!chatId) throw new Error('startListening: chatId required')
     if (this._listen) throw new Error('startListening: already listening')
-    this._listen = { chatId, onMessage, onError, stopped: false, child: null, attempts: 0, timer: null }
+    // 事件流是 app 级的（所有群都推来），这里按配置的群集合过滤（v0.1.51+ 多群，issue #24）
+    const chatSet = new Set([chatId, ...(Array.isArray(chatIds) ? chatIds : [])].filter(Boolean))
+    this._listen = { chatId, chatSet, onMessage, onError, stopped: false, child: null, attempts: 0, timer: null, warnedDrop: false }
     await this._spawnConsumer()
   }
 
@@ -373,7 +384,12 @@ class LarkAdapter extends IMAdapter {
         let ev
         try { ev = JSON.parse(line) } catch { return }
         try {
-          if (ev && ev.chat_id && ev.chat_id !== L.chatId) return  // 只收配置的那个群
+          // fail-closed：没有 chat_id 的事件不能当成本群消息（否则会答到别的群里）；首次丢弃告警一次让 schema 变化可见
+          if (!ev || !ev.chat_id) {
+            if (!L.warnedDrop && L.onError) { L.warnedDrop = true; L.onError(Object.assign(new Error('event 缺 chat_id 已丢弃（lark-cli 事件 schema 可能变了）'), { warn: true })) }
+            return
+          }
+          if (!L.chatSet.has(ev.chat_id)) return  // 只收配置的群
           const m = this._normalizeEvent(ev)
           if (m) L.onMessage(m)
         } catch (err) {
@@ -386,7 +402,8 @@ class LarkAdapter extends IMAdapter {
         settle(reject, Object.assign(new Error(`event consume spawn error: ${err.message}`), { fatal: true }))
       })
 
-      child.on('exit', (code, signal) => {
+      // 'close' 而非 'exit'：保证 stderr 已读完，错误 envelope（auth / validation）才能被正确分类成 fatal
+      child.on('close', (code, signal) => {
         clearTimeout(readyTimer)
         if (L.child === child) L.child = null
         const envelope = parseErrorEnvelope(stderrBuf)

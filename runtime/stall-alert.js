@@ -92,6 +92,7 @@ function createTracker({ runtimeDir, profile, locale, now = Date.now } = {}) {
   const st = {
     pendingSince: 0,     // 第一条未被接手的 emit 时刻
     pendingMsgId: '',
+    pendingChatId: '',   // 该条消息所在群（多群时告警发回这个群，issue #24）
     pendingCount: 0,
     alerted: false,      // 本次 pending 是否已报过
     lastAlertAt: 0,
@@ -103,6 +104,7 @@ function createTracker({ runtimeDir, profile, locale, now = Date.now } = {}) {
   function resetPending() {
     st.pendingSince = 0
     st.pendingMsgId = ''
+    st.pendingChatId = ''
     st.pendingCount = 0
     st.alerted = false
     st.lastAlertAt = 0
@@ -113,6 +115,7 @@ function createTracker({ runtimeDir, profile, locale, now = Date.now } = {}) {
     const r = st.recoverDue
     return {
       action: 'recover',
+      chatId: r.chatId || '',
       text: render('recover', loc, r),
       log: `BOT_INFO|poll.js|stall-recovered|silent=${Math.round(r.silentMs / 1000)}s|by=${r.by}|msg=${r.msgId}|alerts=${r.alerts}`,
     }
@@ -123,12 +126,13 @@ function createTracker({ runtimeDir, profile, locale, now = Date.now } = {}) {
     cfg,
 
     // poll.js emit NEW_MSG 后调用
-    noteEmit(msgId) {
+    noteEmit(msgId, chatId) {
       if (!cfg.enabled) return
       const t = now()
       if (!st.pendingSince) {
         st.pendingSince = t
         st.pendingMsgId = String(msgId || '')
+        st.pendingChatId = String(chatId || '')
       }
       st.pendingCount++
     },
@@ -157,7 +161,7 @@ function createTracker({ runtimeDir, profile, locale, now = Date.now } = {}) {
       if (consumedBy) {
         const silentMs = t - st.pendingSince
         const wasAlerted = st.alerted
-        const info = { silentMs, by: consumedBy, msgId: st.pendingMsgId, alerts: st.alertCount }
+        const info = { silentMs, by: consumedBy, msgId: st.pendingMsgId, chatId: st.pendingChatId, alerts: st.alertCount }
         resetPending()
         if (!wasAlerted) return NONE
         if (!cfg.notifyRecovered) {
@@ -178,6 +182,7 @@ function createTracker({ runtimeDir, profile, locale, now = Date.now } = {}) {
       return {
         action: 'alert',
         again,
+        chatId: st.pendingChatId,
         text: render('alert', loc, ctx),
         log: `BOT_WARN|poll.js|stall-suspected|pending=${Math.round(pendingMs / 1000)}s|hud=${Math.round(hudAgeMs / 1000)}s|msg=${st.pendingMsgId}|queued=${st.pendingCount}|nth=${st.alertCount + 1}`,
       }

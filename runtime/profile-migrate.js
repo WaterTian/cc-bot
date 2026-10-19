@@ -48,6 +48,10 @@ const MIGRATIONS = [
   { version: '0.1.47', path: 'quota_alert.five_hour.urgent_at',    default: 95 },
   { version: '0.1.47', path: 'quota_alert.notify_recovered',       default: true },
   { version: '0.1.47', path: 'quota_alert.hold_messages_when_exhausted', default: true },
+  // 早期加的字段补登记（v0.1.51 审计补漏）：老 profile 缺这些时 doctor 能看见、setup 能 backfill
+  { version: '0.1.10', path: 'im.bot_open_id',                     default: '' },
+  { version: '0.1.20', path: 'polling_mode',                       default: 'monitor' },
+  { version: '0.1.20', path: 'self_poll_interval',                 default: '3m' },
   { version: '0.1.49', path: 'im.transport',                       default: '' },
   { version: '0.1.49', path: 'push_reconcile_interval_ms',         default: 300000 },
   { version: '0.1.49', path: 'permission_bridge',                  default: {} },
@@ -57,6 +61,7 @@ const MIGRATIONS = [
   { version: '0.1.50', path: 'heartbeat',                         default: {} },
   { version: '0.1.50', path: 'heartbeat.stall_mins',              default: 0 },
   { version: '0.1.50', path: 'heartbeat.notify_recovered',        default: true },
+  { version: '0.1.51', path: 'im.chat_ids',                        default: [] },
   // v0.1.27 曾加 im.streaming_card.short_threshold=100；v0.1.30 改为换行判据，字段不再被读取。
   // migration 移除——老 profile 留着此字段无害（代码不读），新 profile 不再 backfill。
 ]

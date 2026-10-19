@@ -23,7 +23,7 @@ Steps:
    **`self-poll` 模式**：`monitor_task_id` 本就是 null（无 Monitor），跳过 TaskStop。self-poll 用 `/loop` 起了一个 **cron 周期任务**（每 interval 跑 /cc-bot:poll-once）—— **必须 `CronDelete` 掉它才能真正停轮询**：cron task id 在 start 那轮 /loop 的输出里（同会话直接拿）；跨会话 / 拿不到则 `CronList` 找命令含 `/cc-bot:poll-once` 的 cron 再删。删 cron 后再设 `paused=true`（下一步）作双保险 —— 即使 cron 漏删，`poll.js --once` 读到 paused 也不处理消息。
 3. Edit `state.json`: set `paused: true`, clear `monitor_task_id`.
 4. Read `.cc-bot/runtime/hud-stdin.json` for context (上下文) data. If valid, include the 上下文 line in the offline notification; if missing/empty, silently skip it — **下线场景不触发 cc-hud shim 排查提示**（用户正在关 bot，此时刷排查提示没意义；仅 /cc-bot:start / 群里问 HUD 时才按 SKILL §HUD 不可用时的处理 输出工程提示）。
-5. Send offline notification to `profile.im.chat_id` — **按 `im.type` 选发送方式，按 `im.locale` 选文案语言**（缺省：`lark`=`zh-CN` / `slack`=`en-US`；profile.im.locale 显式覆盖）：
+5. Send offline notification to every chat in `[im.chat_id, ...im.chat_ids]`（去重；单群就是一条，多群 v0.1.51+ 每群一条，lark 换 `--chat-id` / slack 加 `--channel <id>`）— **按 `im.type` 选发送方式，按 `im.locale` 选文案语言**（缺省：`lark`=`zh-CN` / `slack`=`en-US`；profile.im.locale 显式覆盖）：
 
    **`im.type === 'lark'`**：
    ```bash
