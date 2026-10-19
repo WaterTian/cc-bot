@@ -4,6 +4,11 @@ All notable changes to **cc-bot** are documented here. Format loosely follows [K
 
 Release history is authoritative at the git tag level — see [GitHub releases](https://github.com/WaterTian/cc-bot/releases). This file is human-readable summary, maintained by `node scripts/release.js`.
 
+## [0.1.52] - 2026-10-19
+
+- fix+docs: 文档审计修复 — setup 群列表命令、Slack SDK 全局目录解析、十余处与代码不符的说明 (v0.1.52)
+- docs: npm (cc-bot on npm, release.js --npm), fix cc-hud marketplace name in install hints
+
 ## [0.1.51] - 2026-10-19
 
 - feat: 原生多群监听 im.chat_ids — 每群独立游标 + NEW_MSG CHAT 标签 (#24) + 审计修复一批
