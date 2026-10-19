@@ -129,6 +129,7 @@ cp scripts/blocklist.txt.example scripts/blocklist.txt
 node scripts/release.js patch              # 0.1.1 → 0.1.2（默认不推，手工 git push）
 node scripts/release.js patch --push       # 写文件 + commit + tag + push main + push tag
 node scripts/release.js patch --release    # 一把梭：上面全部 + 自动 gh release create（推荐）
+node scripts/release.js patch --release --npm  # 再加 npm publish（包名 cc-bot，账号 watertian；需本机已 npm login）
 node scripts/release.js minor --dry        # 预览，不写文件（看 changelog entry 合理再执行）
 node scripts/release.js 0.2.0              # 指定具体版本号
 ```
@@ -139,7 +140,9 @@ node scripts/release.js 0.2.0              # 指定具体版本号
 
 preflight 校验：必须在 main 分支、工作区干净、目标 tag 不存在。
 
-发版顺序：① 业务/功能性 commit 先做完、全部推上 main → ② `node scripts/release.js <bump> --release` 一把梭 → ③ 使用 cc-bot 的项目按 README §Updating 跑 3 条命令拉新版。
+发版顺序：① 业务/功能性 commit 先做完、全部推上 main → ② `node scripts/release.js <bump> --release --npm` 一把梭（含 npm publish；没登录 npm 就去掉 `--npm`，事后手工 `npm publish`）→ ③ 使用 cc-bot 的项目按 README §Updating 跑 3 条命令拉新版。
+
+**npm**：包名 `cc-bot`（无 scope），账号 watertian，2026-10-19 起随版本发布；`package.json.files` 白名单限定内容（runtime / adapters / commands / skills / agents / templates / assets / .claude-plugin / README / CHANGELOG / LICENSE），发前 `npm pack --dry-run` 可核对。插件安装仍走 marketplace，npm 只是镜像 + 占名，不提供 `npm i -g` 式安装。
 
 ## 先决条件（使用 cc-bot 的项目需要）
 

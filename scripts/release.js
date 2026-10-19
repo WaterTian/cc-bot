@@ -58,12 +58,13 @@ function writeJson(p, obj) { fs.writeFileSync(p, JSON.stringify(obj, null, 2) + 
 
 function parseArgs() {
   const argv = process.argv.slice(2)
-  const flags = { dry: false, push: false, release: false, commit: true }
+  const flags = { dry: false, push: false, release: false, commit: true, npm: false }
   const positional = []
   for (const a of argv) {
     if (a === '--dry') flags.dry = true
     else if (a === '--push') flags.push = true
     else if (a === '--release') { flags.release = true; flags.push = true }  // --release 隐含 --push
+    else if (a === '--npm') flags.npm = true  // release 之后 npm publish（需已 npm login；失败只提示不回滚）
     else if (a === '--no-commit') flags.commit = false
     else if (a.startsWith('--')) die(`unknown flag: ${a}`)
     else positional.push(a)
@@ -230,6 +231,18 @@ function main() {
     log('GitHub Release 未创建。要建：')
     log(`  gh release create v${next} --title "v${next}" --notes-file CHANGELOG.md`)
     log('或下次直接用 --release（隐含 --push + 建 release 一把梭）。')
+  }
+
+  if (flags.npm && !flags.dry) {
+    // npm 只是镜像 + 占名（安装走 marketplace）：发布失败不影响 GitHub 侧，提示手工补即可
+    try {
+      runInherit('npm publish')
+      log(`✓ npm published: cc-bot@${next}`)
+    } catch (err) {
+      log('')
+      log(`⚠ npm publish 失败：${err.message}`)
+      log('手工补：npm login（账号 watertian）后在仓库根跑 npm publish')
+    }
   }
 }
 

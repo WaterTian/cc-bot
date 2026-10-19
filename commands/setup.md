@@ -666,7 +666,7 @@ Steps 1-5 可以并行执行（读 template + 3 次 Write + 1 次 mkdir），提
    ```
    statusline shim 已注册，cc-bot 会自己落盘 HUD 数据。想同时让状态栏显示模型 / 上下文 / 额度？装 cc-hud（可选，shim 会自动 tee 渲染）：
      /plugin marketplace add WaterTian/cc-hud
-     /plugin install cc-hud@WaterTian-cc-hud
+     /plugin install cc-hud@cc-hud
    ```
 
    **HUD_STATE == `installed`** 时追加：

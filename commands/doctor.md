@@ -229,7 +229,7 @@ node ${CLAUDE_PLUGIN_ROOT}/runtime/permission-bridge.js status --project <项目
 ### 7. cc-hud (optional)
 
 - `~/.claude/plugins/installed_plugins.json` 含 `cc-hud@` key → ℹ 已装 `<version>`
-- 未装 → ℹ 未装（不影响 cc-bot 群 HUD 意图，仅影响状态栏视觉；可选装 `/plugin marketplace add WaterTian/cc-hud` + `/plugin install cc-hud@WaterTian-cc-hud`）
+- 未装 → ℹ 未装（不影响 cc-bot 群 HUD 意图，仅影响状态栏视觉；可选装 `/plugin marketplace add WaterTian/cc-hud` + `/plugin install cc-hud@cc-hud`）
 
 ---
 

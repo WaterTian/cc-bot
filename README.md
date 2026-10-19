@@ -32,6 +32,8 @@
 <p align="center">
   <a href="https://github.com/WaterTian/cc-bot/releases"><img src="https://img.shields.io/github/v/tag/WaterTian/cc-bot?style=flat-square&label=version&color=blueviolet&sort=semver" alt="version" /></a>
   &nbsp;
+  <a href="https://www.npmjs.com/package/cc-bot"><img src="https://img.shields.io/npm/v/cc-bot?style=flat-square&color=cb3837&label=npm" alt="npm" /></a>
+  &nbsp;
   <a href="#install"><img src="https://img.shields.io/badge/install-4_commands-blueviolet?style=flat-square" alt="install" /></a>
   &nbsp;
   <img src="https://img.shields.io/badge/im-lark%20%C2%B7%20slack-blue?style=flat-square" alt="im" />
@@ -94,7 +96,7 @@ Inside Claude Code **in your target project**, run these in order:
 /cc-bot:setup
 ```
 
-- Line 1 — register the plugin source (GitHub repo)
+- Line 1 — register the plugin source (GitHub repo). The same files are also published to npm as [`cc-bot`](https://www.npmjs.com/package/cc-bot) for mirrors and `npm view`; the marketplace remains the install path (there is no `npm i -g` setup)
 - Line 2 — download to `~/.claude/plugins/cache/`. CC will pop a **scope selector**; pick one:
 
   | Option | When to use | Recommendation |
@@ -308,7 +310,7 @@ Works for **any project type** — Web / mini-program / Node service / Python da
 - **For lark**: `npm i -g @larksuite/cli` + `lark-cli auth login` (setup wizard will guide this)
 - **For slack**: `npm i -g @slack/socket-mode @slack/web-api` + create an App at api.slack.com/apps via the `templates/slack-manifest.yaml` (setup wizard will guide token paste-in)
 - **Shell** — **Windows**: Git Bash required (cmd.exe / PowerShell mangle special characters in argv); **macOS / Linux**: system bash works out of the box
-- **Optional: cc-hud** — install for prettier status bar (`/plugin install cc-hud@WaterTian-cc-hud`); cc-bot shim tees it automatically
+- **Optional: cc-hud** — prettier status bar: `/plugin marketplace add WaterTian/cc-hud` then `/plugin install cc-hud@cc-hud`; cc-bot's statusline shim tees it automatically
 
 <br/>
 
