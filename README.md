@@ -65,9 +65,9 @@
 > **Windows 用户：** 建议用 `npm i -g @anthropic-ai/claude-code` 代替原生安装器，规避 Bun 内存崩溃；cc-bot 的 Monitor 是长驻进程，会放大 Bun 的内存问题。
 
 > [!NOTE]
-> **Sibling project: [SintBot](https://github.com/WaterTian/sintbot), the standalone-daemon edition.** cc-bot runs inside the Claude Code session you already have open, on that session's model. SintBot runs on its own: no one has to keep a terminal open, it drives headless Claude Code or Codex, and each group gets its own project, model and permissions (Feishu, Slack, WeCom). MIT · `npm i -g sintbot` · [sintbot.com](https://sintbot.com/?utm_source=cc-bot-readme)
+> **Sibling project: [SintBot](https://github.com/sintlab/sintbot), the standalone-daemon edition.** cc-bot runs inside the Claude Code session you already have open, on that session's model. SintBot runs on its own: no one has to keep a terminal open, it drives headless Claude Code or Codex, and each group gets its own project, model and permissions (Feishu, Slack, WeCom). MIT · `npm i -g sintbot` · [sintbot.com](https://sintbot.com/?utm_source=cc-bot-readme)
 >
-> **姊妹项目：[SintBot](https://github.com/WaterTian/sintbot/blob/main/README.zh-CN.md)（独立守护进程版）。** cc-bot 跑在你已经打开的 Claude Code 会话里，用的就是这个会话的模型；SintBot 自己常驻：不用有人守着终端，无头驱动 Claude Code 或 Codex，每个群各有项目、模型和权限（飞书、Slack、企业微信）。MIT · `npm i -g sintbot` · [sintbot.com](https://sintbot.com/zh/?utm_source=cc-bot-readme)
+> **姊妹项目：[SintBot](https://github.com/sintlab/sintbot/blob/main/README.zh-CN.md)（独立守护进程版）。** cc-bot 跑在你已经打开的 Claude Code 会话里，用的就是这个会话的模型；SintBot 自己常驻：不用有人守着终端，无头驱动 Claude Code 或 Codex，每个群各有项目、模型和权限（飞书、Slack、企业微信）。MIT · `npm i -g sintbot` · [sintbot.com](https://sintbot.com/zh/?utm_source=cc-bot-readme)
 
 <br/>
 
